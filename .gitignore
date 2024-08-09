@@ -37,6 +37,6 @@
 .Spotlight-V100
 .Trashes
 
-# tracking stuff
+# internal tracking that's unnecessary to commit
 __pycache__
 .vscode

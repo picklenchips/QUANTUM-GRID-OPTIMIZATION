@@ -33,6 +33,7 @@ dependencies:
   - python-igraph  # plotting
   - plotly
   - nbformat       # plotly in ipynb
+  - geopy
 # QUANTUM
 #  - pip  # to install classiq
 #  - pip:
