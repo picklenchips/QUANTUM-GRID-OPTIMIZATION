@@ -16,6 +16,7 @@ from cycler import cycler
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
+import matplotlib.colors as mcolors
 #import matplotlib.lines as mlines
 #import plotly.graph_objects as go
 
@@ -72,7 +73,7 @@ CVALS = justADictionary("Useful Physics constants, indexed in class for easy acc
 # IBM's colorblind-friendly colors
 #           |   Red  |   Blue  |  Orange |  Purple | Yellow  |   Green |   Teal  | Grey
 hexcolors = ['DC267F', '648FFF', 'FE6100', '785EF0', 'FFB000', '009E73', '3DDBD9', '808080']
-mpl.rcParams['axes.prop_cycle'] = cycler('color', [mpl.colors.to_rgba('#' + c) for c in hexcolors])
+mpl.rcParams['axes.prop_cycle'] = cycler('color', [mcolors.to_rgba('#' + c) for c in hexcolors])
 
 def savefig(title):
     plt.savefig(SAVEDIR + title + SAVEEXT, bbox_inches='tight')
