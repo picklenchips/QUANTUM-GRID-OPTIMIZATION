@@ -53,14 +53,17 @@ In this project we demonstrate the potential of quantum computing in optimizing 
 
 We want to make an accessible portal to show others this potential and pave a pathway for current grid providers to consider quantum computing solutions when planning grid modernization. 
 
-1. Translate from inputs of OSM power data or ___ to a `pandapower` network
-1. Run various optimization algorithms on the network classically. 
+1. Translate from open-source data to a `pandapower` network for classical electrical grid modelling
+   1. translating from [transnet-models](https://github.com/OpenGridMap/transnet-models) has been implemented
+   1. TODO: translate from PSS/E power modelling format
+   1. TODO: translate directly from OSM data by inferring electrical circuits in real-time, like [transnet/app](https://github.com/OpenGridMap/transnet/tree/master/app)
+1. Run various optimization algorithms on the network classically
 1. Use D-Wave quantum annealing to accelerate the optimizations with quantum computing
 
 We solve the following optimization problems with quantum methods:
 1. Self-sufficient microgrid formation with predicted loads
-1. Optimal AC power flow equation solving
+1. TODO: Optimal AC power flow equation solving
 
 ### Project Presentation Deck:
-_Link a 5min. presentation recording or deck here._
+[_Link a 5min. presentation recording or deck here._](https://docs.google.com/presentation/d/15lL3aQ6CYwhdSUpaZ9nDa9ytmNhJPK7m2RATeNz-G9s/edit?usp=sharing)
 

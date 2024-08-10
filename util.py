@@ -25,6 +25,22 @@ from scipy import special  # for voigt function
 from scipy.optimize import curve_fit
 
 
+# new stuff
+
+def options_menu(name: str, options: list) -> int | None:
+    while 1:
+        out = input(f'which {name} would you like to load? (name or idx) \n>>').rstrip().lower()
+        if out.isdigit():
+            try:
+                out = options[int(out)]
+            except IndexError:
+                print(f'please enter a valid region index 0-{len(options)-1}')
+                continue
+        if out in options:
+            return options.index(out)
+        print(f'please enter a valid {name}')
+
+
 # -- CONSTANTS -- #
 # these directories are supposed to change by the user
 DATADIR      = "/Users/benkroul/Documents/Physics/Data/"

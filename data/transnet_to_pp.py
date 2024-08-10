@@ -11,7 +11,7 @@ from collections import defaultdict
 pdir = sys.path[0] + '/..'
 if pdir not in sys.path:
     sys.path.append(pdir)
-from util import timeIt, Ith
+from util import options_menu
 
 
 ### TRANSNET DATA (.csvs) ###
@@ -175,31 +175,27 @@ def transnet_to_pp(nodes: pd.DataFrame, lines: pd.DataFrame, separate_voltage=Fa
                             vn_kv=line['voltage']/1000, parallel=cables, name=line['name'], index=line['l_id'])
     return net
 
-
 if __name__ == '__main__':
+    save_net = True
+    plot = False
     # create a pandapower network from transnet data
     # get data directory, or make if not there
     cwd = os.getcwd()
     transnet_dir = cwd + "/data/transnet/"
     if not os.path.exists(transnet_dir):
         os.makedirs(transnet_dir)
+    save_dir = cwd + '/data/ppnets/'
+    if save_net and not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    # SELECT A TRANSNET REGION
     transnet_data = get_transnet_paths(transnet_dir)
-    print('found data for regions',', '.join([f for f in transnet_data.keys()]))
-    while 1:
-        region = input('which region would you like to load?\n>>').rstrip().lower()
-        if region.isdigit():
-            try:
-                region = [f for f in transnet_data.keys()][int(region)]
-            except IndexError:
-                print('please enter a valid region index 0-{}'.format(len(transnet_data)-1))
-                continue
-        if region in transnet_data.keys():
-            break
-        print('please enter a valid region')
+    regions = [f for f in transnet_data.keys()]
+    print('found data for regions',', '.join(regions))
+    region = regions[options_menu('region', regions)]
     transnet_region = transnet_data[region]
+    print('reading data for region', region)
     transnet_region.read_data()
-    
-    print(transnet_region)
     print_info = True
     if print_info:
         n = transnet_region.nodes
@@ -219,6 +215,16 @@ if __name__ == '__main__':
     separate_voltage = 'y' in t
     net = transnet_to_pp(transnet_region.nodes, transnet_region.lines, separate_voltage)
     print(net)
-    ppplot.simple_plot(net, plot_gens=True, plot_loads=True)
-    #ppplot.simple_plotly(net, on_map=True, use_line_geodata=False, figsize=1)
-    # , on_map=True, use_line_geodata=False, filename='temp-plot.html')
+    if save_net:
+        name = f'{save_dir}transnet-{region}-{t}.db'
+        pp.to_sqlite(net, name, include_results=False)
+        print('saved sqlite to ',name)
+
+    if plot:
+        # for mapbox plotting with plotly 
+        fullAccess = '***REMOVED-MAPBOX-TOKEN***'
+        ppplot.set_mapbox_token(fullAccess)
+        ppplot.simple_plot(net, plot_gens=True, plot_loads=True)
+        # doesn't work :( why????
+        ppplot.simple_plotly(net, on_map=True, use_line_geodata=False, figsize=1)
+        # , on_map=True, use_line_geodata=False, filename='temp-plot.html')
