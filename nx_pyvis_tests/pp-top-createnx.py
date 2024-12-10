@@ -343,8 +343,8 @@ def get_edge_table(net, table_name: str, include_edges) -> pd.DataFrame:
     return table
 
 
-def add_edges(mg: nx.MultiGraph, indices: np.ndarray, parameter: np.ndarray, in_service: list[int], net, element, calc_branch_impedances=False,
-              branch_impedance_unit="ohm"):
+def add_edges(mg: nx.MultiGraph|nx.Graph, indices: np.ndarray, parameter: np.ndarray, in_service: list[int], net, element, 
+              calc_branch_impedances=False, branch_impedance_unit="ohm"):
     # this function is optimized for maximum perfomance, because the loops are called for every
     # branch element. That is why the loop over the numpy array is copied for each use case instead
     # of making a more generalized function or checking the different use cases inside the loop
