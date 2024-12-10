@@ -9,7 +9,7 @@ const MapScreen = () => {
         <View style={styles.container}>
             <WebView
                 originWhitelist={['*']}
-                source={require('../../assets/opengridmap_source.html')} 
+                source={require('../../../web/opengridmap_source.html')} 
                 style={{ height: webviewHeight }}
             />
         </View>
