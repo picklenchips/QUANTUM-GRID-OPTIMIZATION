@@ -7,3 +7,7 @@ We take it one step further by selecting open-source grid data in real-time, whi
 TODO:
 1. Selection feature
 2. Decide on pipeline backend
+
+---
+
+*Related: [[physics/womanium/QUANTUM-GRID-OPTIMIZATION/README]] · [[physics/womanium/QUANTUM-GRID-OPTIMIZATION/QPGrid/README]] · [[cs/CLAUDE]]*

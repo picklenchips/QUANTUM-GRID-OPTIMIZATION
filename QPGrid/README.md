@@ -64,3 +64,7 @@ npx create-expo-app -e with-router
 ## 📝 Notes
 
 - For more information on how to use Expo Router, check out the [Expo Router: Docs](https://docs.expo.dev/router/introduction/)
+
+---
+
+*Related: [[physics/womanium/QUANTUM-GRID-OPTIMIZATION/README]] · [[physics/womanium/QUANTUM-GRID-OPTIMIZATION/web/README]] · [[cs/CLAUDE]]*

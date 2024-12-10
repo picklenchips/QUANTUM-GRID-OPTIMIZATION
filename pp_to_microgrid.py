@@ -12,7 +12,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import pandapower as pp
 import pandapower.toolbox as pptools
-import pandapower.auxiliary as aux
 
 import networkx as nx
 
@@ -79,8 +78,8 @@ def create_minimal_example(nbusses=3):
     pp.create_switch(net, bus = previ, element = i, et = 'l', closed = False)
     return net
 
-
-net = pp.from_sqlite('/Users/benkroul/Documents/Physics/womanium/QUANTUM-GRID-OPTIMIZATION/data/ppnets/transnet-california-n.db')
+cwd = os.getcwd()
+net = pp.from_sqlite(cwd+'data/ppnets/transnet-california-n.db')
 print(net)
 
 def admittance_of_pd(df: pd.DataFrame) -> pd.Series:

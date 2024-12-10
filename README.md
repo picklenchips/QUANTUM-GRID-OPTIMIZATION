@@ -67,3 +67,6 @@ We solve the following optimization problems with quantum methods:
 ### Project Presentation Deck:
 [_Link a 5min. presentation recording or deck here._](https://docs.google.com/presentation/d/15lL3aQ6CYwhdSUpaZ9nDa9ytmNhJPK7m2RATeNz-G9s/edit?usp=sharing)
 
+---
+
+*Related: [[physics/README]] · [[physics/CLAUDE]] · [[cs/CLAUDE]] · [[papers/HHL_algo_2009]] · [[physics/womanium/QUANTUM-GRID-OPTIMIZATION/QPGrid/README]] · [[physics/Q-SITE-Classiq-Open-Challenge-Quantum-Trees/README]]*
