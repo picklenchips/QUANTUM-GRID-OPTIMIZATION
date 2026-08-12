@@ -78,10 +78,6 @@ def create_minimal_example(nbusses=3):
     pp.create_switch(net, bus = previ, element = i, et = 'l', closed = False)
     return net
 
-cwd = os.getcwd()
-net = pp.from_sqlite(cwd+'data/ppnets/transnet-california-n.db')
-print(net)
-
 def admittance_of_pd(df: pd.DataFrame) -> pd.Series:
     # should be faster to write a native pandas function
     return df['r_ohm_per_km'] - 1j*df['x_ohm_per_km']/(df['length_km']*(df['r_ohm_per_km']**2 + df['x_ohm_per_km']**2))
@@ -121,6 +117,10 @@ class NetGraph():
         self.consider_trafos = consider_trafos
         # store all bus, line, and trafo indices as numpy arrays
         self.buses = net.bus.index.to_numpy()
+        # bus IDs are not guaranteed contiguous 0..n-1 (e.g. transnet_to_pp
+        # creates buses with explicit index=n_id) -- map bus ID -> array
+        # position once here, use positions everywhere self.A is indexed
+        self._pos = {int(b): i for i, b in enumerate(self.buses)}
         self.lines = net.line.index.to_numpy()
         if self.consider_trafos:
             self.trafos = net.trafo.index.to_numpy()
@@ -144,6 +144,12 @@ class NetGraph():
             return self.buses[idx]
         assert isinstance(idx, Iterable)
         return [self.buses[i] for i in idx]
+
+    def bus_to_idx(self, bus: int | Iterable[int]) -> int | list[int]:
+        if isinstance(bus, (int, np.integer)):
+            return self._pos[int(bus)]
+        assert isinstance(bus, Iterable)
+        return [self._pos[int(b)] for b in bus]
 
     def make_nx_graph(self, out_of_service=[]) -> nx.Graph:
         """
@@ -181,7 +187,7 @@ class NetGraph():
         n = len(self.buses)
         # LINES
         if from_nx:
-            if not isinstance(self.N, nx.Graph): 
+            if not isinstance(self.N, nx.Graph):
                 self.make_nx_graph()
             assert isinstance(self.N, nx.Graph)
             self.from_bus, self.to_bus = np.array(self.N.edges).T
@@ -191,33 +197,41 @@ class NetGraph():
             self.from_bus = self.net.line['from_bus'].to_numpy()
             self.to_bus = self.net.line['to_bus'].to_numpy()
         self.line_buses = np.unique(np.concatenate([self.from_bus, self.to_bus]))
-        row_lines = np.concatenate([self.from_bus, self.to_bus])
-        col_lines = np.concatenate([self.to_bus, self.from_bus])
+        # bus IDs -> array positions (bus IDs aren't guaranteed 0..n-1)
+        from_pos = np.array([self._pos[int(b)] for b in self.from_bus], dtype=int)
+        to_pos = np.array([self._pos[int(b)] for b in self.to_bus], dtype=int)
+        row_lines = np.concatenate([from_pos, to_pos])
+        col_lines = np.concatenate([to_pos, from_pos])
         line_data = np.concatenate([self.lines, self.lines])
         self.A_lines = csr_matrix((line_data, (row_lines, col_lines)), shape=(n, n), dtype=int)
         # TRAFOS``
-        self.hv_bus = self.lv_bus = []
+        hv_pos = lv_pos = np.array([], dtype=int)
         trafo_data = []
         if self.consider_trafos:
             self.hv_bus = self.net.trafo['hv_bus'].to_numpy()
             self.lv_bus = self.net.trafo['lv_bus'].to_numpy()
             self.trafo_buses = np.unique(np.concatenate([self.hv_bus, self.lv_bus]))
-            row_trafos = np.concatenate([self.hv_bus, self.lv_bus])
-            col_trafos = np.concatenate([self.lv_bus, self.hv_bus])
+            hv_pos = np.array([self._pos[int(b)] for b in self.hv_bus], dtype=int)
+            lv_pos = np.array([self._pos[int(b)] for b in self.lv_bus], dtype=int)
+            row_trafos = np.concatenate([hv_pos, lv_pos])
+            col_trafos = np.concatenate([lv_pos, hv_pos])
             trafo_data = np.concatenate([self.trafos, self.trafos])
             self.A_trafos = csr_matrix((trafo_data, (row_trafos, col_trafos)), shape=(n, n), dtype=int)
+        else:
+            self.hv_bus = self.lv_bus = np.array([], dtype=int)
         # concatenate the two matrices into big adjacency matrix
-        row_indices = np.concatenate([self.from_bus, self.to_bus, self.hv_bus, self.lv_bus])
-        col_indices = np.concatenate([self.to_bus, self.from_bus, self.lv_bus, self.hv_bus])
+        row_indices = np.concatenate([from_pos, to_pos, hv_pos, lv_pos])
+        col_indices = np.concatenate([to_pos, from_pos, lv_pos, hv_pos])
         data = np.concatenate([line_data, trafo_data])
         self.A = csr_matrix((data, (row_indices, col_indices)), shape=(n, n), dtype=int)
         return self.A
 
     def cut_to_nbus(self, nbuses: int) -> None:
         """
-        Cuts the network to the first nbusses
-        ensures that the network is still connected by performing a 
-        breadth-first search from a random bus
+        Cuts the network down to (at most) nbuses buses, keeping it
+        connected: breadth-first-search from a bus in the largest connected
+        component until nbuses buses have been visited (or the component
+        is exhausted).
         """
         if self.A is None:
             self.make_adjacency_matrix()
@@ -228,77 +242,74 @@ class NetGraph():
         if nbuses >= len(self.buses):
             print(f"{nbuses}>={len(self.buses)}, so no need to cut network")
             return
-        
+
         n = len(self.buses)
-        best_visited = np.zeros(n, dtype=bool)
-        # generates all connected components as sets of bus indices
-        all_CCs = nx.connected_components(self.N)
-        for CC in all_CCs:
-            if len(CC) >= nbuses:
-                break
-            cn = len(CC)
-            start = CC[0]
-            # perform a breadth-first search
-            visited = np.zeros(n, dtype=bool)
-            visited[start] = True
-            Q = queue.Queue()
-            Q.put(start)
-            nbuses_added = 1
-            def search_connected_component(Q: queue.Queue, visited: np.ndarray, nbuses_added: int):
-                assert isinstance(self.A, csr_matrix)
-                while not Q.empty() and nbuses_added < nbuses:
-                    b = Q.get()
-                    start = self.A.indptr[b]
-                    end = self.A.indptr[b + 1]
-                    # iterate over all buses connected to bus b
-                    connected_buses = self.A.indices[start:end]
-                    for j in connected_buses:
-                        if not visited[j]:
-                            visited[j] = True
-                            Q.put(j)
-                            nbuses_added += 1
-                            if nbuses_added >= nbuses:
-                                break
-                return nbuses_added
-            
-        best_visited = visited
-        best_nbuses = nbuses_added
-        while True:
-            search_connected_component(Q, visited, nbuses_added)
-            if nbuses_added >= nbuses:
-                best_visited = visited
-                break
+        # start the search from the largest connected component so we have
+        # the best chance of reaching nbuses without exhausting it
+        largest_cc = max(nx.connected_components(self.N), key=len)
+        start_bus = next(iter(largest_cc))
+        start_pos = self.bus_to_idx(start_bus)
+
+        visited = np.zeros(n, dtype=bool)
+        visited[start_pos] = True
+        Q = queue.Queue()
+        Q.put(start_pos)
+        nbuses_added = 1
+        while not Q.empty() and nbuses_added < nbuses:
+            b = Q.get()
+            start = self.A.indptr[b]
+            end = self.A.indptr[b + 1]
+            connected = self.A.indices[start:end]
+            for j in connected:
+                if not visited[j]:
+                    visited[j] = True
+                    Q.put(j)
+                    nbuses_added += 1
+                    if nbuses_added >= nbuses:
+                        break
 
         # delete all buses not visited
-        self.only_keep_buses(best_visited)
+        self.only_keep_buses(visited)
 
     def only_keep_buses(self, keep: np.ndarray) -> None:
         """
-        Keeps only the buses in the given boolean array
+        Keeps only the buses in the given boolean array (indexed by array
+        position, matching self.buses / self.A ordering)
          - updates self.N representation
-         - creates new self.A
+         - rebuilds self.A restricted to the kept buses
         """
         busesToKeep = self.buses[keep]
         busesToRemove = self.buses[~keep]
         if self.N is None:
             self.make_nx_graph(out_of_service=busesToRemove)
-            self.make_adjacency_matrix()
-            return
-        assert isinstance(self.N, nx.Graph)
+        else:
+            assert isinstance(self.N, nx.Graph)
+            self.N.remove_nodes_from(busesToRemove)
 
-        
-        self.N.remove_nodes_from(busesToRemove)
+        # rebuild A restricted to kept buses, remapped to new (smaller)
+        # position space so self.A stays consistent with self.buses
         if self.A is None:
             self.make_adjacency_matrix()
         assert isinstance(self.A, csr_matrix)
-        self.buses = busesToKeep
-        new_indptr = []
-        new_indices = []
-        new_data = []
-        for row in range(len(self.A.indptr)-1):
-            if keep[row]:
+        old_to_new_pos = {old: new for new, old in enumerate(np.flatnonzero(keep))}
+        n_new = len(busesToKeep)
+        new_row, new_col, new_data = [], [], []
+        for row in range(len(self.A.indptr) - 1):
+            if not keep[row]:
+                continue
+            start, end = self.A.indptr[row], self.A.indptr[row + 1]
+            for idx in range(start, end):
+                col = self.A.indices[idx]
+                if not keep[col]:
+                    continue
+                new_row.append(old_to_new_pos[row])
+                new_col.append(old_to_new_pos[col])
+                new_data.append(self.A.data[idx])
 
-        self.lines = np.unique(self.A.data)
+        self.buses = busesToKeep
+        self._pos = {int(b): i for i, b in enumerate(self.buses)}
+        self.A = csr_matrix((new_data, (new_row, new_col)), shape=(n_new, n_new), dtype=int)
+        self.lines = np.unique(self.A.data) if len(new_data) else np.array([], dtype=int)
     
     def add_admittance_impedance(self, net = None | aux.pandapowerNet) -> np.complex64:
         """ add admittance and impedance matrices to the network as the keys
@@ -400,6 +411,16 @@ def power_transfer_distribution_factor(net: aux.pandapowerNet, a_line: int, t_li
     Z = net['Zbus']
     return (abs(Z[i,m]) - abs(Z[i,n]) - abs(Z[j,m]) + abs(Z[j,n])) / X[i,j]
 
+# NOTE (docs/pipeline/state.md task 1): min_sensitivity_matrix,
+# electrical_coupling_strength_matrix, and modularity_matrix below are only
+# reached when microgrid_objective() is called with lambd<1 -- the default
+# (lambd=1) path uses self_reliance_matrix only and does not exercise them.
+# They have known unfixed bugs (min_coeff never assigned back in the loop
+# below, C built with integer dtype losing precision, a bus-ID-vs-position
+# indexing issue like the one fixed elsewhere in this file, and an
+# electrical_coupling_strength_matrix Y-slicing expression that doesn't do
+# what its comment implies) -- left as a follow-up, not silently patched
+# without being able to verify correctness against real data.
 @ timeIt
 def min_sensitivity_matrix(net: aux.pandapowerNet) -> csr_matrix:
     """
@@ -471,18 +492,25 @@ def self_reliance_matrix(net: aux.pandapowerNet) -> csr_matrix:
     formatted for QUBO with offset sum_{i,j} p_i p_j
     Returns the matrix S and the offset
      - load is positive, generation is negative (consumer model)
+     - matrix is indexed by array position (0..n-1 in net.bus.index order),
+       not raw bus IDs -- bus IDs aren't guaranteed contiguous (e.g. buses
+       created with explicit index=n_id in transnet_to_pp.py)
     """
     # both positive
     n = len(net.bus)
+    bus_pos = {b: i for i, b in enumerate(net.bus.index)}
     loads = []        # store p_i values
-    power_buses = []  # store bus indices
+    power_buses = []  # store bus array positions
     max_P = 0         # normalize powers
     for bus in net.bus.index:
         load = net.load.loc[net.load['bus'] == bus, 'p_mw'].sum() - net.gen.loc[net.gen['bus'] == bus, 'p_mw'].sum() - net.sgen.loc[net.sgen['bus'] == bus, 'p_mw'].sum()
         if load:
             max_P = max(max_P, load**2)
             loads.append(load)
-            power_buses.append(bus)
+            power_buses.append(bus_pos[bus])
+    if not loads:
+        # no net load/generation anywhere -- nothing to optimize
+        return csr_matrix((n, n), dtype=float)
     # now that we have lists of indices, values, we create matrix from all combinations
     col, row = np.meshgrid(power_buses, power_buses, sparse=False)
     data = np.outer(loads, loads) / max_P
@@ -605,76 +633,60 @@ def objective_energy(f: csr_matrix, x: dict[int, int]) -> float:
     return energy
 
 
-def simulate_anneal(bqm: BQM, num_reads=1000) -> SampleSet:
+def simulate_anneal(bqm: BQM, num_reads=1000) -> tuple[dict[int, int], float]:
     """
-    Return solution to any BinaryQuadraticModel problem
+    Solves the given BinaryQuadraticModel problem, on real D-Wave hardware if
+    a DWaveSampler is configured, otherwise falls back to classical
+    simulated annealing (no D-Wave account/token needed).
+    Returns (solution, energy) -- solution[var] = 0 or 1.
     """
     try:
-        # if dwave.system has been imported
+        # if dwave.system has been imported and a solver/token is configured
         sampler = EmbeddingComposite(DWaveSampler())
-    except:
+    except Exception:
         sampler = SimulatedAnnealingSampler()
     response = sampler.sample(bqm, num_reads=num_reads)
-    lowest = response.lowest()
-    return lowest
+    best = response.first  # dimod.SampleView: .sample (dict), .energy
+    return dict(best.sample), float(best.energy)
 
 
 class PartitionStorage():
+    """Bookkeeping for one queued sub-network in microgrid_optimization's
+    (currently single-level) partition search."""
     def __init__(self, level: int, objective: csr_matrix, best_energy: float, buses: list[int]):
         self.level = level
         self.objective = objective
         self.best_energy = best_energy
         self.buses = buses
-        raise NotImplementedError
-    
+
     def unpack(self) -> tuple[int, csr_matrix, float]:
         return self.level, self.objective, self.best_energy
 
 @ timeIt
 def microgrid_optimization(net: aux.pandapowerNet, lambd = 1, num_reads=1000) -> tuple[dict[int, int], float]:
     """
-    Solves the microgrid optimization problem for the given network
+    Solves the microgrid partitioning problem for the given network as a
+    single QUBO bipartition (splits buses into two groups by minimizing the
+    microgrid objective).
      - net: the pandapower network
-     - lambd: the weighting factor of the self-reliance matrix
-     - num_reads: the number of reads to find the optimal partition
-    Returns the optimal solution and the energy
-    """
-    # only need to calculate objective once
-    #  then we just partition it repeatedly
-    objective = microgrid_objective(net, lambd)
-    best_energy = np.inf
-    # store the full solution as a list where 
-    # fsol[i] = 
-    full_solution = {}
-    
-    # initialize the queue with the full network
-    # format is (level, objective matrix, best energy of section)
-    Q = queue.Queue()
-    Q.put(PartitionStorage(0,objective,best_energy,[i for i in net.bus.index]))
-    queue_size = 1
-    #TODO: actually, we do want a global best energy because we are optimizing objective over the whole network... 
-    #TODO: thus, we need to write a way to evaluate the energy on the entire objective, with multiple groups?
-    # TODO: this is because modularity is nonlinear when we partition the network as we lose edge weights
-    # TODO: this is OK though because we just edit the to_QUBO
-    while queue_size:
-        item = Q.get()
-        queue_size -= 1
-        level, objective, best_energy = Q.unpack()
+     - lambd: weighting factor of the self-reliance matrix (default 1 =
+       self-reliance only; lambd<1 pulls in the modularity term, which has
+       known unfixed bugs -- see note above min_sensitivity_matrix)
+     - num_reads: number of annealer reads to find the optimal partition
+    Returns (solution, energy) where solution[bus_position] = 0 or 1 is the
+    partition group for the bus at that array position in net.bus.index.
 
-        q_dict, offset = to_QUBO(objective)
-        bqm = BQM.from_qubo(q_dict, offset=offset)
-        solution, energy = simulate_anneal(bqm, num_reads)
-        if energy >= best_energy:
-            # energy is worse than best energy of section of network
-            continue
-        best_energy = energy
-        full_solution.append(solution)
-        # partition the network
-        ob1, ob2 = partition_csr(objective, solution)
-    # repeat the optimization problem by binary partitioning the grid
-    # according tot he optimal solution, and then running optimization again
-    # on each sub-part until the parameters are completely optimized. 
-    return solution
+    NOTE: recursive multi-level partitioning (splitting each group again) is
+    intentionally not implemented here -- the original design's open
+    question about evaluating global energy under a nonlinear modularity
+    term across partitions (see git history) is unresolved; this returns one
+    bipartition rather than silently pretending to solve that.
+    """
+    objective = microgrid_objective(net, lambd)
+    q_dict, offset = to_QUBO(objective)
+    bqm = BQM.from_qubo(q_dict, offset=offset)
+    solution, energy = simulate_anneal(bqm, num_reads)
+    return solution, energy
 
 if __name__ == '__main__':
     while 1:
@@ -704,9 +716,15 @@ if __name__ == '__main__':
 
             #ppplot.simple_plot(net, plot_loads = True, plot_gens=True)
         else:
-            net = pp.from_sqlite('/Users/benkroul/Documents/Physics/womanium/QUANTUM-GRID-OPTIMIZATION/data/ppnets/transnet-california-n.db')
+            cwd = os.getcwd()
+            net = pp.from_sqlite(cwd + '/data/ppnets/transnet-california-n.db')
             print(net)
             n = input('how many busses to keep?\n>>').rstrip().lower()
             n = int(n) if n.isdigit() else 100
-            cut_net_to_nbusses(net, n)
-            
+            N = NetGraph(net)
+            N.cut_to_nbus(n)
+            print(f'cut to {len(N.buses)} buses')
+            solution, energy = microgrid_optimization(net, lambd=1, num_reads=100)
+            print(f'microgrid partition energy: {energy}')
+            print(f'partition (bus position -> group): {solution}')
+            break
