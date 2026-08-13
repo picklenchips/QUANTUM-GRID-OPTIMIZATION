@@ -1,6 +1,20 @@
+"""
+Docstring for data.osm_to_pp
+
+TODO:
+ [ ] Sphinx-ify all docstrings
+ [ ] Graph breadth-first search to expand OSM pp data past power station, see transnet (it does this)
+ [ ] End goal: be able to do OSM --> Network() where we can traverse OSM data dynamically (ofc store in cache for later easy access if computationally diffucult, w/ graph BFS hyperparameters)
+
+
+
+"""
+
 import requests
 import xml.etree.ElementTree as ET
 import queue
+import math
+import re
 from collections import defaultdict
 import pandapower as pp
 import pandapower.auxiliary as aux
@@ -193,16 +207,183 @@ def print_osm_info(INDICES, SUBTAGS, KEYTAG='power', indent=4):
                 lev2 = indent + lev1 + alen - clen
                 print(' '*lev2+f"{count} {name}")
 
+DEFAULT_SUBSTATION_KV = 20.0  # OSM substations are rarely tagged with a clean voltage; this is
+                               # a generic MV-distribution placeholder used whenever no usable
+                               # 'voltage' tag is present. Same default is reused for standalone
+                               # power=generator nodes (see docstring below for why they get a
+                               # bus at all).
+DEFAULT_PLANT_KV = 110.0       # power=plant nodes default to a sub-transmission interconnection
+                               # voltage instead, since plants usually connect higher up than a
+                               # neighborhood substation.
+
+
+def _parse_voltage_kv(tags: dict, default_kv: float) -> float:
+    """ OSM's 'voltage' tag is documented (OSM wiki) to be in volts, and may be a
+    semicolon-separated list for a multi-voltage substation/line (take the max, mirroring
+    add_transnet_bus's handling of transnet's own semicolon-separated voltage field in
+    transnet_to_pp.py). Falls back to default_kv if the tag is missing or unparseable. """
+    v = tags.get('voltage')
+    if not v:
+        return default_kv
+    try:
+        if ';' in v:
+            v = max(float(x) for x in v.split(';') if x.strip())
+        else:
+            v = float(v)
+        return v / 1000.0  # volts -> kV
+    except (ValueError, TypeError):
+        return default_kv
+
+
+def _parse_power_mw(tag_value) -> float | None:
+    """ parse an OSM power-output tag (e.g. generator:output:electricity='6 MW',
+    plant:output:electricity='500 kW') into MW. Returns None if missing/unparseable, so callers
+    can fall back to a default rather than mistaking an unparseable tag for a real 0 MW. """
+    if not tag_value:
+        return None
+    m = re.match(r'^\s*([\d.]+)\s*([a-zA-Z]*)', str(tag_value))
+    if not m:
+        return None
+    try:
+        val = float(m.group(1))
+    except ValueError:
+        return None
+    unit = m.group(2).upper()
+    if unit.startswith('GW'):
+        return val * 1000.0
+    if unit.startswith('KW'):
+        return val / 1000.0
+    return val  # 'MW' or no unit given -> assume MW
+
+
+def _haversine_km(lat1, lon1, lat2, lon2) -> float:
+    """ great-circle distance in km between two lat/lon points -- used to give OSM-derived
+    lines a real length_km (OSM doesn't tag line length directly, but does give us both
+    endpoints' coordinates via the substation/plant/generator nodes they connect). """
+    R = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
 def network_from_OSM(OSM_DATA) -> aux.pandapowerNet:
     """
-    Create a pandapower network from the OSM data.
-    1. infer network by looping over substations
-    2. add lines between substations
+    Create a pandapower network from OSM power=* data, following the same "buses first, then
+    generators, then lines" pattern as transnet_to_pp() in transnet_to_pp.py.
+
+    INPUT: OSM_DATA is whatever get_OSM_data() above returns -- either the (DATA, INDICES) or
+    (DATA, INDICES, SUBTAGS) tuple -- or a bare DATA dict (INDICES is then rebuilt by scanning
+    DATA for 'power' tags).
+
+    This is a *basic, direct* conversion of what OSM explicitly gives us, NOT the full
+    graph-inference engine described in the module TODO at the top of this file and in
+    notebooks/OSM_power.ipynb's markdown cells (which is why transnet was used instead, for a
+    more complete/curated network). Concretely, it:
+     1. creates one bus per power=substation, power=plant, and power=generator *node* (way/
+        relation substations are skipped -- see below)
+     2. adds a pp.create_gen at each plant/generator bus
+     3. adds a pp.create_line for every power=line/minor_line way whose OSM node path directly
+        contains 2+ of the bus nodes from step 1, connecting consecutive touches along the path
+
+    Known simplifications (intentionally left as-is, not "bugs"):
+     - Only 'node'-type substations/plants/generators become buses. A substation mapped as a
+       'way' (building outline) or 'relation' has no single lat/lon and, critically, no OSM
+       *node* ID that a line's node-path could ever reference (way IDs and node IDs are
+       independent ID spaces in OSM) -- so it can never be an explicit line endpoint anyway and
+       is skipped rather than guessing a centroid for it.
+     - A line way only connects to a bus when the line's own node path *directly* contains that
+       bus's OSM node ID -- i.e. the line explicitly touches the substation/plant/generator
+       node. It does NOT infer a connection when a line merely ends near (but not exactly at) a
+       substation, e.g. at an untagged utility pole a few meters from the substation fence.
+       That would need a spatial nearest-neighbor index (e.g. a k-d tree over all substation
+       coordinates), which is out of scope for this basic pass.
+     - power=generator nodes get their own bus even though that's not literally a "substation
+       or plant" -- pp.create_gen needs *some* bus to attach to, and matching a standalone
+       generator (e.g. a single wind turbine) to its nearest substation is exactly the
+       nearest-neighbor inference ruled out above. This models each standalone generator as
+       directly grid-connected at its own point, which is a simplification but doesn't
+       fabricate connectivity the data doesn't contain.
+     - Bus vn_kv is set once at creation time from the node's own 'voltage' tag (or a default)
+       and is NOT reconciled against a connecting line's voltage tag by spinning up an offshoot
+       bus + transformer the way transnet_to_pp.py's create_offshoot_bus does for multi-voltage
+       substations -- OSM voltage tagging is too sparse/unreliable for that extra machinery to
+       be worth it here.
+     - OSM never tags conductor impedance, so unlike transnet_to_pp.py (which has real
+       r_ohm_km/x_ohm_km/c_nf_km columns to build a std_type from), every OSM-derived line here
+       just reuses pandapower's built-in "NAYY 4x150 SE" std_type as an inert placeholder --
+       do not trust power-flow results computed from these line parameters.
     """
     net = pp.create_empty_network()
 
-    raise NotImplementedError("Need to implement this OSM stuff")
+    # accept (DATA, INDICES[, SUBTAGS]) from get_OSM_data(), or a bare DATA dict
+    if isinstance(OSM_DATA, (tuple, list)):
+        DATA, INDICES = OSM_DATA[0], OSM_DATA[1]
+    else:
+        DATA = OSM_DATA
+        INDICES = defaultdict(list)
+        for id_, tags in DATA.items():
+            if 'power' in tags:
+                INDICES[tags['power']].append(id_)
 
+    bus_of_node = {}  # OSM node id -> pandapower bus index (substation/plant/generator nodes only)
+
+    # 1 + 2. buses (substation/plant/generator nodes) + generators (plant/generator nodes)
+    for ptype in ('substation', 'plant', 'generator'):
+        default_kv = DEFAULT_PLANT_KV if ptype == 'plant' else DEFAULT_SUBSTATION_KV
+        for node_id in INDICES.get(ptype, []):
+            tags = DATA[node_id]
+            if tags.get('osm_type') != 'node':
+                continue  # way/relation substations: no lat/lon, no line-referenceable node id
+            try:
+                lat, lon = float(tags['lat']), float(tags['lon'])
+            except (KeyError, TypeError, ValueError):
+                continue
+            vn_kv = _parse_voltage_kv(tags, default_kv)
+            name = tags.get('name', f'{ptype} {node_id}')
+            bus_idx = pp.create_bus(net, vn_kv=vn_kv, name=name, geodata=(lat, lon), type='b')
+            bus_of_node[node_id] = bus_idx
+
+            if ptype in ('plant', 'generator'):
+                p_mw = _parse_power_mw(tags.get('generator:output:electricity'))
+                if p_mw is None:
+                    p_mw = _parse_power_mw(tags.get('plant:output:electricity'))
+                if p_mw is None:
+                    # same defaults transnet_to_pp.py uses for its 'generator'/'plant' node types
+                    p_mw = 50.0 if ptype == 'plant' else 10.0
+                pp.create_gen(net, bus=bus_idx, p_mw=p_mw, vm_pu=1.0, name=name,
+                               slack=False, type='unknown', controllable=True,
+                               max_p_mw=p_mw, min_p_mw=0, max_q_mvar=0.01, min_q_mvar=0)
+
+    # 3. lines: connect consecutive bus-touches along each line/minor_line way's node path
+    for line_type in ('line', 'minor_line'):
+        for way_id in INDICES.get(line_type, []):
+            way = DATA[way_id]
+            if way.get('osm_type') != 'way':
+                continue
+            touches = []  # [(node_id, bus_idx), ...] in path order along the way
+            for ref in way.get('nodes', []):
+                try:
+                    ref_id = int(ref)
+                except (TypeError, ValueError):
+                    continue
+                if ref_id in bus_of_node:
+                    touches.append((ref_id, bus_of_node[ref_id]))
+            if len(touches) < 2:
+                # line doesn't directly touch >=2 known substation/plant/generator nodes --
+                # skip it (see docstring: no nearest-neighbor inference here)
+                continue
+            vn_kv = _parse_voltage_kv(way, DEFAULT_SUBSTATION_KV)
+            name = way.get('name', f'line {way_id}')
+            for (n1, b1), (n2, b2) in zip(touches, touches[1:]):
+                if b1 == b2:
+                    continue
+                geo1 = net['bus_geodata'].loc[b1]
+                geo2 = net['bus_geodata'].loc[b2]
+                length_km = max(_haversine_km(geo1['x'], geo1['y'], geo2['x'], geo2['y']), 0.001)
+                pp.create_line(net, from_bus=b1, to_bus=b2, length_km=length_km,
+                                std_type="NAYY 4x150 SE", name=name, vn_kv=vn_kv)
     return net
 
 if __name__ == '__main__':

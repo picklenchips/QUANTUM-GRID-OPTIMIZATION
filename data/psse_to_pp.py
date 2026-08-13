@@ -108,21 +108,23 @@ def get_psse_paths(pathname) -> list[str]:
 
 
 def parse_to_vars(parts: list[str]) -> None:
-    """ modifies list of strings in place to be ints or floats if possible """
+    """modifies parts --> list[str | int | float], converting from str whenever possible"""
+
     for i in range(len(parts)):
         parts[i] = parts[i].strip()
         # strings are encoded as 'STR     '
         if parts[i][0] == "'":
             parts[i] = parts[i][1:-1].strip()
         try:
-            parts[i] = int(parts[i])
+            parts[i] = int(parts[i])  # type: ignore
         except:
             try:
-                parts[i] = float(parts[i])
+                parts[i] = float(parts[i])  # type: ignore
             except:
                 pass
 
-def PSS_raw_reader(filepath, printInfo=False) -> dict[str: pd.DataFrame]:
+
+def PSS_raw_reader(filepath, printInfo=False) -> dict[str, pd.DataFrame]:
     with open(filepath, 'r') as f:
         lines = f.readlines()
     DATA = {}
@@ -145,7 +147,7 @@ def PSS_raw_reader(filepath, printInfo=False) -> dict[str: pd.DataFrame]:
     while i + 1 < len(lines):
         i += 1
         line = lines[i]
-        
+
         # SECTION CHANGE
         if line.startswith("0 / "):
             msgs = line[4:].split(',')
@@ -158,7 +160,7 @@ def PSS_raw_reader(filepath, printInfo=False) -> dict[str: pd.DataFrame]:
                 break
             new = msgs[1][7:].lower() # skip " BEGIN "
             section = new[:-6]  # skip " DATA"
-            #print('now on section '+section)
+            # print('now on section '+section)
             allTitles = [] # reset titles
             rowsPerEntry = 0
             entryIndex = 0
@@ -177,7 +179,7 @@ def PSS_raw_reader(filepath, printInfo=False) -> dict[str: pd.DataFrame]:
                     titles[j] = titles[j][1:-1].strip()
             allTitles.append(titles)
         elif section == 'system':
-            # we don't care about eanything in the intial specifications, 
+            # we don't care about eanything in the intial specifications,
             # so let's just print em all
             ret += line
         else:
@@ -189,7 +191,7 @@ def PSS_raw_reader(filepath, printInfo=False) -> dict[str: pd.DataFrame]:
             # columns that have the same length, so we must fill in the blanks with None if so
             if entryIndex == 0:
                 entry = {}
-            #print(allTitles, entryIndex, rowsPerEntry)
+            # print(allTitles, entryIndex, rowsPerEntry)
             titles = allTitles[entryIndex]
             for j in range(len(parts)):
                 if j < len(titles):
@@ -208,6 +210,7 @@ def PSS_raw_reader(filepath, printInfo=False) -> dict[str: pd.DataFrame]:
         for section, frame in DATA.items():
             print(f"{len(frame)} {section}(s) w/ {len(frame.columns)} columns {', '.join(frame.columns)}")
     return DATA
+
 
 def PSS_dyr_reader(filepath, printInfo=False) -> pd.DataFrame:
     # lines are separated by "/"
@@ -259,8 +262,105 @@ def PSS_dyr_reader(filepath, printInfo=False) -> pd.DataFrame:
     return DYR
 
 def raw_to_pp(RAW: dict[str, pd.DataFrame]) -> aux.pandapowerNet:
+    """ convert PSS/E raw data (as parsed by PSS_raw_reader above) into a pandapower network,
+    following the same "buses first, then loads/gens, then branches as lines" pattern as
+    transnet_to_pp() in transnet_to_pp.py.
+
+    Column names below were confirmed against the real WECC 240-bus test case
+    (data/psse/WECC_240bus_2018summer_2021_IEEE-NASPI_OSL/240busWECC_2018_PSS.raw) by actually
+    running PSS_raw_reader() on it -- NOT guessed from col_defs above (col_defs is just a field
+    glossary; the real DataFrame columns are upper-case abbreviations like 'BASKV', 'PL', 'PG').
+
+    Known simplifications:
+     - Only the 'bus', 'load', 'generator', and 'branch' sections are converted. The
+       'transformer' section (voltage-changing branches between different-BASKV buses) is NOT
+       turned into pandapower trafo elements -- out of scope for this pass. In the WECC test
+       file this means buses that are only reachable via a transformer (e.g. the 500/345/230kV
+       levels of a multi-voltage substation) end up topologically disconnected from the 'line'
+       elements built here, even though the bus objects themselves (with their loads/gens) are
+       all still created correctly.
+     - PSS/E branch R/X/B are lumped per-unit impedances for the whole branch (on the system
+       MVA base, from the .raw SYSTEM-WIDE DATA header), not per-unit-length values, and this
+       file's LEN/RATE1-12 fields are all 0 (no physical length or thermal rating given). Each
+       branch is therefore modeled as a 1 km pandapower line whose std_type r/x/c *per km*
+       equal that branch's *total* impedance (length_km=1) -- the standard trick for shoehorning
+       a lumped-impedance branch into pandapower's per-km line model without inventing a length.
+       max_i_ka has no source data at all in this file, so a generous placeholder (5 kA, i.e.
+       effectively non-binding) is used; do not trust thermal-loading results from this network.
+     - PSS/E's raw format models each load as a ZIP load: PL/QL (constant-MVA), IP/IQ
+       (constant-current), YP/YQ (constant-admittance), all already expressed in MW/Mvar at
+       rated voltage. In the WECC file every load's PL/QL is 0 and the actual demand lives in
+       IP/YQ instead, so summing just PL+QL would create zero loads. All three ZIP components
+       are summed into a single constant-MVA-equivalent p_mw/q_mvar per row (what
+       pp.create_load models), which reproduces the file's real 139/139 nonzero loads.
+     - Exactly one bus has IDE==3 (PSS/E's "swing"/slack bus code). Of the generators at that
+       bus, only the single largest one (by PT, max active power) is marked slack=True --
+       marking every generator at that bus as slack would over-determine the network's slack
+       reference and isn't needed just to build the pandapower object.
+    """
     net = pp.create_empty_network()
-    raise NotImplementedError
+    if 'bus' not in RAW or not len(RAW['bus']):
+        return net
+    bus = RAW['bus']
+    Sbase = 100.0  # MVA system base, from the .raw file's SYSTEM-WIDE DATA header (field 2)
+
+    # 1. buses
+    for _, row in bus.iterrows():
+        pp.create_bus(net, index=int(row['ID']), name=row['NAME'], vn_kv=float(row['BASKV']),
+                       zone=row['ZONE'], type='b')
+
+    # 2. loads -- sum the PSS/E ZIP load components into one constant-MVA equivalent per row
+    #    (see docstring: this file's demand is carried by IP/YQ, not PL/QL)
+    if 'load' in RAW:
+        for _, row in RAW['load'].iterrows():
+            p_mw = float(row['PL']) + float(row['IP']) + float(row['YP'])
+            q_mvar = float(row['QL']) + float(row['IQ']) + float(row['YQ'])
+            if p_mw == 0 and q_mvar == 0:
+                continue
+            pp.create_load(net, bus=int(row['I']), p_mw=p_mw, q_mvar=q_mvar,
+                            name=f"load {row['I']}-{row['ID']}", in_service=bool(row['STAT']))
+
+    # 3. generators
+    if 'generator' in RAW:
+        gen = RAW['generator']
+        swing_bus_ids = set(bus.loc[bus['IDE'] == 3, 'ID']) if 'IDE' in bus.columns else set()
+        # pick a single slack generator per swing bus (the largest by max active power PT)
+        slack_rows = set()
+        for swing_id in swing_bus_ids:
+            at_bus = gen[gen['I'] == swing_id]
+            if len(at_bus):
+                slack_rows.add(at_bus['PT'].astype(float).idxmax())
+        for idx, row in gen.iterrows():
+            pp.create_gen(net, bus=int(row['I']), p_mw=float(row['PG']), vm_pu=float(row['VS']),
+                          name=f"gen {row['I']}-{row['ID']}", slack=(idx in slack_rows),
+                          in_service=bool(row['STAT']), controllable=True,
+                          max_p_mw=float(row['PT']), min_p_mw=float(row['PB']),
+                          max_q_mvar=float(row['QT']), min_q_mvar=float(row['QB']))
+
+    # 4. branches -> lines
+    if 'branch' in RAW:
+        vn_kv_of_bus = bus.set_index('ID')['BASKV']
+        for _, row in RAW['branch'].iterrows():
+            i, j = int(row['I']), int(row['J'])
+            v = vn_kv_of_bus.get(i, vn_kv_of_bus.get(j))
+            if not v:
+                continue  # no base kv available on either end -- can't derive ohms from pu
+            zbase = v ** 2 / Sbase   # ohms
+            ybase = Sbase / v ** 2   # siemens
+            r_ohm = float(row['R']) * zbase
+            x_ohm = float(row['X']) * zbase
+            # susceptance (pu) -> capacitance (nF), assuming 60 Hz like the rest of WECC
+            c_nf = float(row['B']) * ybase / (2 * 3.141592653589793 * 60) * 1e9
+            typedata = {'r_ohm_per_km': r_ohm, 'x_ohm_per_km': x_ohm, 'c_nf_per_km': c_nf,
+                        'max_i_ka': 5.0}  # placeholder -- RATE1-12 are all 0 in this file
+            fitting_types = pp.find_std_type_by_parameter(net, typedata, element='line', epsilon=0.001)
+            if len(fitting_types):
+                std_type = fitting_types[0]
+            else:
+                std_type = f"branch {i}-{j}-{row['CKT']}"
+                pp.create_std_type(net, typedata, std_type)
+            pp.create_line(net, from_bus=i, to_bus=j, length_km=1.0, std_type=std_type,
+                            name=f"branch {i}-{j}-{row['CKT']}", in_service=bool(row['STAT']))
     return net
 
 
