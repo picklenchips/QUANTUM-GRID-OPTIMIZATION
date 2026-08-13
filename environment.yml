@@ -5,10 +5,11 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-# classiq only runs up to 3.11, not 3.12
-# so we only install python up to 3.11
-  - python==3.11 
+# classiq only runs up to 3.13, not 3.14
+# so we only install python up to 3.13
+  - python==3.13 
   - ipykernel  # for jupyter notebooks
+  - marimo
   - numpy
 # DOWNLOAD FROM OSM
   - requests
@@ -23,7 +24,7 @@ dependencies:
   - psycopg2  # PostgreSQL adapter
   - networkx  # for general graphs
   - numba     # improves performance
-  - ortools   # google mixed-integer programming optimization tools
+  - ortools-python   # google mixed-integer programming optimization tools (conda-forge package is "ortools-python", not "ortools")
 ### pandapower.plotting
   - python-igraph
   - geopandas
@@ -40,7 +41,7 @@ dependencies:
 #    - classiq  
   # or qiskit:
 #  - qiskit-terra  # conda-forge::
-  - dwave-ocean-sdk
+  - dwave-ocean-sdk>=9,<10  # dwavebinarycsp was removed in 9.0.0 -- pin deliberately, not accidentally
 # OTHERS
 #  - pyvis   # conda-forge::
 #  - pytorch  # for GNN

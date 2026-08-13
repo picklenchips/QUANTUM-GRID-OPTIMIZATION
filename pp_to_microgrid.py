@@ -29,10 +29,12 @@ from typing import Iterable
 
 import queue
 
-publicToken = '***REMOVED-MAPBOX-TOKEN***'
-noWriting = '***REMOVED-MAPBOX-TOKEN***'
-fullAccess = '***REMOVED-MAPBOX-TOKEN***'
-ppplot.set_mapbox_token(fullAccess)
+# Mapbox tokens were previously hardcoded here and committed to a public
+# repo -- treat those as compromised, rotate them in the Mapbox dashboard.
+# Set MAPBOX_TOKEN in the environment before running anything that plots.
+fullAccess = os.environ.get('MAPBOX_TOKEN', '')
+if fullAccess:
+    ppplot.set_mapbox_token(fullAccess)
 
 # netv = pandapower.networks.example_multivoltage()
 nbusses = 3
@@ -360,7 +362,9 @@ class NetGraph():
 @ timeIt
 def add_admittance_impedance(net: aux.pandapowerNet) -> np.complex64:
     """ add admittance and impedance matrices to the network as the keys
-        'Ybus' and 'Zbus' respectively, stored as csr_matrices
+        'Ybus' and 'Zbus' respectively, stored as csr_matrices, indexed by
+        array position (0..n-1 in net.bus.index order) -- not raw bus IDs,
+        which aren't guaranteed contiguous (see NetGraph._pos)
     1. compute the admittance matrix Y_ij by open-circuiting all loads
       Y_{ii} = \sum_{k \in N(i)} 1/Z_{ik}
       Y_{ij} = -1/Z_{ij} if i \neq j and (i, j) is a line
@@ -368,24 +372,27 @@ def add_admittance_impedance(net: aux.pandapowerNet) -> np.complex64:
     2. compute the impedance matrix Z_ij = inv(Y_ij)
     """
     buses = net.bus.index.to_numpy()
+    bus_pos = {b: i for i, b in enumerate(buses)}
     # get addmittance from each (from, to) line
     from_bus = net.line['from_bus'].to_numpy()
     to_bus = net.line['to_bus'].to_numpy()
+    from_pos = np.array([bus_pos[b] for b in from_bus], dtype=int)
+    to_pos = np.array([bus_pos[b] for b in to_bus], dtype=int)
     Y = admittance_of_pd(net.line).to_numpy() # = 1/Z = 1/(R+jX) = 1 / l*(r+jx)
     # get maximum admittance for normalization purposes
     Ymax = np.max(np.abs(Y))
-    # all buses contained in (from, to)
+    n = len(buses)
     # compute the diagonal elements of the admittance matrix
-    diag = np.zeros_like(buses)
-    for i in range(len(buses)):
-        msk = np.logical_or(from_bus == buses[i], to_bus == buses[i])
+    diag = np.zeros(n, dtype=np.complex64)
+    for i in range(n):
+        msk = np.logical_or(from_pos == i, to_pos == i)
         diag[i] = np.sum(Y[msk])
     # diagonal, then off-diagonal elements
     # allow indexing both (from, to) and (to, from)
-    row_indices = np.concatenate([buses, from_bus, to_bus])
-    col_indices = np.concatenate([buses, to_bus, from_bus])
+    positions = np.arange(n)
+    row_indices = np.concatenate([positions, from_pos, to_pos])
+    col_indices = np.concatenate([positions, to_pos, from_pos])
     data = np.concatenate([diag, -Y, -Y])
-    n = len(buses)
     Y = csr_matrix((data, (row_indices, col_indices)), shape=(n, n), dtype=np.complex64)
     net['Ybus'] = Y
     net['Zbus'] = inv(Y)
@@ -403,51 +410,55 @@ def power_transfer_distribution_factor(net: aux.pandapowerNet, a_line: int, t_li
     """
     # calculate impedances if not already calculated
     if 'Zbus' not in net: add_admittance_impedance(net)
+    # Zbus is indexed by array position (see add_admittance_impedance), not
+    # raw bus ID -- remap before indexing into it
+    bus_pos = {b: p for p, b in enumerate(net.bus.index.to_numpy())}
     ref_line = net.line.loc[t_line]
-    i, j = ref_line.from_bus, ref_line.to_bus
+    i, j = bus_pos[ref_line.from_bus], bus_pos[ref_line.to_bus]
     aff_line = net.line.loc[a_line]
-    m, n = aff_line.from_bus, aff_line.to_bus
-    X = net.res_line['x_ohm_per_km']*net.line['length_km']
+    m, n = bus_pos[aff_line.from_bus], bus_pos[aff_line.to_bus]
+    # X_ij is the total reactance of the perturbed (reference) line t_line,
+    # not a (bus,bus)-indexed quantity. x_ohm_per_km is a line input
+    # (net.line), not a power-flow result -- net.res_line doesn't carry it.
+    X = net.line.loc[t_line, 'x_ohm_per_km'] * net.line.loc[t_line, 'length_km']
     Z = net['Zbus']
-    return (abs(Z[i,m]) - abs(Z[i,n]) - abs(Z[j,m]) + abs(Z[j,n])) / X[i,j]
+    return (abs(Z[i,m]) - abs(Z[i,n]) - abs(Z[j,m]) + abs(Z[j,n])) / X
 
-# NOTE (docs/pipeline/state.md task 1): min_sensitivity_matrix,
-# electrical_coupling_strength_matrix, and modularity_matrix below are only
-# reached when microgrid_objective() is called with lambd<1 -- the default
-# (lambd=1) path uses self_reliance_matrix only and does not exercise them.
-# They have known unfixed bugs (min_coeff never assigned back in the loop
-# below, C built with integer dtype losing precision, a bus-ID-vs-position
-# indexing issue like the one fixed elsewhere in this file, and an
-# electrical_coupling_strength_matrix Y-slicing expression that doesn't do
-# what its comment implies) -- left as a follow-up, not silently patched
-# without being able to verify correctness against real data.
+# NOTE: min_sensitivity_matrix / electrical_coupling_strength_matrix /
+# modularity_matrix below are only reached when microgrid_objective() is
+# called with lambd<1 -- the default (lambd=1) path uses self_reliance_matrix
+# only.
 @ timeIt
 def min_sensitivity_matrix(net: aux.pandapowerNet) -> csr_matrix:
     """
     Returns the (normalized) minimum sensitivity matrix for the network
       Used for subsequent microgrid optimization formulations
     C_{ij} = min_l P_l*PTDF_{ij}^l, for all lines (i,j)
+    Matrix is indexed by array position (0..n-1 in net.bus.index order).
     """
     if 'Zbus' not in net: add_admittance_impedance(net)
-    # get addmittance from each (from, to) line
-    from_bus = net.line['from_bus'].to_numpy()
-    to_bus = net.line['to_bus'].to_numpy()
+    bus_pos = {b: p for p, b in enumerate(net.bus.index.to_numpy())}
+    from_pos = np.array([bus_pos[b] for b in net.line['from_bus'].to_numpy()], dtype=int)
+    to_pos = np.array([bus_pos[b] for b in net.line['to_bus'].to_numpy()], dtype=int)
     n = len(net.bus)
-    C = np.zeros_like(from_bus)
+    C = np.zeros(len(net.line), dtype=float)
     maxC = -np.inf  # normalize sensitivity weighting
     for i, line in enumerate(net.line.index):
         min_coeff = np.inf
+        # lines don't carry their own vn_kv in pandapower -- use the
+        # voltage of the bus the line originates from
+        vn_kv = net.bus.loc[net.line.loc[line, 'from_bus'], 'vn_kv']
         for line2 in net.line.index:
             if line == line2:  # PTDF is 0 for the same line
                 continue
-            c = line['vn_kv']*power_transfer_distribution_factor(net, line, line2)
-            c = min(c, min_coeff)
+            c = vn_kv * power_transfer_distribution_factor(net, line, line2)
+            min_coeff = min(c, min_coeff)
         C[i] = min_coeff
         maxC = max(maxC, min_coeff)
-    row_indices = np.concatenate([from_bus, to_bus])
-    col_indices = np.concatenate([to_bus, from_bus])
-    data = np.concatenate([C, C]) / maxC
-    ret = csr_matrix((data, (row_indices, col_indices)), shape=(n, n), dtype=np.complex64)
+    row_indices = np.concatenate([from_pos, to_pos])
+    col_indices = np.concatenate([to_pos, from_pos])
+    data = np.concatenate([C, C]) / maxC if maxC else np.zeros(2 * len(C))
+    ret = csr_matrix((data, (row_indices, col_indices)), shape=(n, n), dtype=float)
     return ret
 
 @ timeIt
@@ -458,17 +469,15 @@ def electrical_coupling_strength_matrix(net: aux.pandapowerNet, alpha=0.5) -> cs
       where Y_ij is the admittance matrix, C_ij is the 'sensitivity' matrix, and both are normalized
       here alpha = beta = 1/2
      - Used for subsequent microgrid optimization formulations
-   
     """
     if alpha < 0 or alpha > 1: alpha = 0.5
     if 'Zbus' not in net: add_admittance_impedance(net)
-    n = len(net.bus)
-    # skip all diagonal elements, which are the first n elements
-    Y = net['Ybus'][n:]
-    Y = Y / np.max(np.abs(Y))
+    Y = net['Ybus']
+    Ymax = np.max(np.abs(Y.data)) if Y.nnz else 1.0
+    Yn = abs(Y) / Ymax
     # get the normalized sensitivity matrix
     C = min_sensitivity_matrix(net)
-    return np.abs(alpha * Y + (1-alpha) * C)
+    return abs(alpha * Yn + (1 - alpha) * C)
 
 @ timeIt
 def modularity_matrix(net: aux.pandapowerNet) -> csr_matrix:
@@ -479,10 +488,12 @@ def modularity_matrix(net: aux.pandapowerNet) -> csr_matrix:
      and m is the sum of all edge weights (not double counted)
     """
     A = electrical_coupling_strength_matrix(net, alpha=0.5)
-    k = A.sum(axis=1)
+    k = np.asarray(A.sum(axis=1)).flatten()
     m = k.sum()
-    M = (A - np.outer(k, k) / m ) / m
-    return M
+    # A - outer(k,k)/m is dense (outer product has no sparsity structure);
+    # convert back to csr_matrix -- downstream (to_QUBO etc.) expects one
+    M = (A - np.outer(k, k) / m) / m
+    return csr_matrix(M)
 
 @ timeIt
 def self_reliance_matrix(net: aux.pandapowerNet) -> csr_matrix:

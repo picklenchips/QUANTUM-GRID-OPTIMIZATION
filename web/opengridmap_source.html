@@ -174,7 +174,10 @@
         
     <script>
         // Initialize the map
-        mapboxgl.accessToken = '***REMOVED-MAPBOX-TOKEN***';
+        // was hardcoded to a public (pk.) token under a different Mapbox
+        // account than this project's own -- unclear provenance, removed.
+        // Substitute your own Mapbox public token below.
+        mapboxgl.accessToken = 'REPLACE_WITH_YOUR_MAPBOX_PUBLIC_TOKEN';
         const map = new mapboxgl.Map({
             container: 'map', // container id
             style: 'mapbox://styles/mapbox/dark-v11', // style URL

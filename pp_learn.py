@@ -1,5 +1,13 @@
 # attempt to recreate the pandapower admittance matrix
 # calculation
+#
+# STATUS: abandoned/exploratory, not used by anything else in this repo.
+# References pandapower internal APIs (_pd2ppc_zero is never defined/
+# imported anywhere; _init_ppc/_create_k_updated_ppci/_get_is_ppci_bus are
+# private pandapower.shortcircuit internals that may not match current
+# pandapower's internal structure). Needs a real rewrite against current
+# pandapower internals, not a mechanical patch -- left as-is rather than
+# faked into looking more complete than it is.
 
 try:
     from pandapower.pf.makeYbus_numba import makeYbus

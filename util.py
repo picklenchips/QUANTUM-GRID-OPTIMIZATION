@@ -46,6 +46,7 @@ def options_menu(name: str, options: list) -> int | None:
 # these directories are supposed to change by the user
 DATADIR      = "/Users/benkroul/Documents/Physics/Data/"
 SAVEDIR      = "/Users/benkroul/Documents/Physics/plots/"
+PLOTDIR      = SAVEDIR  # alias -- quantum_util.py imports PLOTDIR specifically
 SAVEEXT      = ".png"
 FIGSIZE      = (10,6)
 TICKSPERTICK = 5

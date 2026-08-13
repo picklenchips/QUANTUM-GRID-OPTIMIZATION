@@ -70,14 +70,20 @@ def add_transnet_bus(net: aux.pandapowerNet, node: pd.Series|dict, separate_volt
                   geodata=(node['latitude'], node['longitude']), type='b' )  #is busbar
 
 def create_offshoot_bus(net: aux.pandapowerNet, bus_id: int, new_voltage: float) -> int:
-    """ offshoot a new lower-voltage bus from an existing bus, adding a busbar and transformer 
+    """ offshoot a new lower-voltage bus from an existing bus, adding a busbar and transformer
       - shift the geodata of the new bus by a tiny bit east """
+    import json
     bus = net['bus'].loc[bus_id].copy()
     bus['vn_kv'] = new_voltage
-    # shift bus geodata by a tiny bit
-    old_geo = net['bus_geodata'].loc[bus_id]
-    bus['geodata'] = (old_geo['x']+0.005, old_geo['y'])
-    new_id = int(pp.create_bus(net, **bus))
+    # shift bus geodata by a tiny bit -- pandapower >=3.0 stores geodata as a
+    # GeoJSON string in the 'geo' column, not a separate bus_geodata table
+    geo_raw = net['bus'].loc[bus_id, 'geo']
+    if geo_raw:
+        x, y = json.loads(geo_raw)['coordinates']
+    else:
+        x, y = 0.0, 0.0
+    bus = bus.drop('geo')
+    new_id = int(pp.create_bus(net, geodata=(x + 0.005, y), **bus))
     # add a transformer from the highest bus to this new bus
     pp.create_transformer(net, hv_bus=bus_id, lv_bus=new_id, std_type='0.4 MVA 20/0.4 kV')
     return new_id
@@ -221,9 +227,12 @@ if __name__ == '__main__':
         print('saved sqlite to ',name)
 
     if plot:
-        # for mapbox plotting with plotly 
-        fullAccess = '***REMOVED-MAPBOX-TOKEN***'
-        ppplot.set_mapbox_token(fullAccess)
+        # for mapbox plotting with plotly -- set MAPBOX_TOKEN in the
+        # environment; a token was previously hardcoded here and
+        # committed to a public repo, treat it as compromised
+        fullAccess = os.environ.get('MAPBOX_TOKEN', '')
+        if fullAccess:
+            ppplot.set_mapbox_token(fullAccess)
         ppplot.simple_plot(net, plot_gens=True, plot_loads=True)
         # doesn't work :( why????
         ppplot.simple_plotly(net, on_map=True, use_line_geodata=False, figsize=1)

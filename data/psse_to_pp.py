@@ -392,9 +392,12 @@ if __name__ == '__main__':
         pp.to_sqlite(net, save_dir+path.split('/')[-1]+'.db')
     
     if plot:
-        # for mapbox plotting with plotly 
-        fullAccess = '***REMOVED-MAPBOX-TOKEN***'
-        ppplot.set_mapbox_token(fullAccess)
+        # for mapbox plotting with plotly -- set MAPBOX_TOKEN in the
+        # environment; a token was previously hardcoded here and
+        # committed to a public repo, treat it as compromised
+        fullAccess = os.environ.get('MAPBOX_TOKEN', '')
+        if fullAccess:
+            ppplot.set_mapbox_token(fullAccess)
         ppplot.simple_plot(net, plot_gens=True, plot_loads=True)
         # doesn't work :( why????
         ppplot.simple_plotly(net, on_map=True, use_line_geodata=False, figsize=1)
