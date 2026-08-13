@@ -1,7 +1,13 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
 
-const HomeScreen = ({ navigation }) => {
+// Only 'home' / 'map' / 'info' are registered tabs (see _layout.jsx) --
+// 'Dashboard'/'Live Data' map onto the map tab (the only data view that
+// exists), 'About' onto the info tab (the only content page that exists).
+// No new screens invented, just wired to what's actually there.
+const HomeScreen = () => {
+    const router = useRouter();
     return (
         <View style={styles.container}>
             <Text style={styles.appName}>QPGrid</Text>
@@ -13,16 +19,16 @@ const HomeScreen = ({ navigation }) => {
                 <Text style={styles.featureText}>📊 Interactive Visualizations: Visualize grid data and optimization processes.</Text>
             </View>
             <View style={styles.buttonContainer}>
-                <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('Dashboard')}>
+                <TouchableOpacity style={styles.button} onPress={() => router.push('/tabs-layout/map')}>
                 <Text style={styles.buttonText}>Dashboard</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('LiveData')}>
+                <TouchableOpacity style={styles.button} onPress={() => router.push('/tabs-layout/map')}>
                 <Text style={styles.buttonText}>Live Data</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('Info')}>
+                <TouchableOpacity style={styles.button} onPress={() => router.push('/tabs-layout/info')}>
                 <Text style={styles.buttonText}>Info</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('About')}>
+                <TouchableOpacity style={styles.button} onPress={() => router.push('/tabs-layout/info')}>
                 <Text style={styles.buttonText}>About</Text>
                 </TouchableOpacity>
             </View>

@@ -2,15 +2,18 @@ import React from 'react';
 import { View, ScrollView, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
 
 // Component for rendering each section
-const Section = ({ title, content, imageUrl }) => (
+// `image` is a required asset module (require('./path.jpg')), not a URI --
+// React Native's Image `uri` prop needs an http(s) URL or a require()'d
+// module, not a relative filesystem path string.
+const Section = ({ title, content, image }) => (
     <View style={styles.section}>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.content}>{content}</Text>
-        {imageUrl && <Image source={{ uri: imageUrl }} style={styles.image} />}
+        {image && <Image source={image} style={styles.image} />}
     </View>
 );
 
-const Info = ({ navigation }) => {
+const Info = () => {
     return (
         <View style={styles.container}>
             <ScrollView contentContainerStyle={styles.scrollContainer}>
@@ -21,7 +24,7 @@ const Info = ({ navigation }) => {
                 <Section
                     title="Impact of Climate Change on the Power Grid"
                     content="Rising temperatures increase electricity demand, especially for cooling. Extreme weather events can damage infrastructure, causing power outages and disruptions."
-                    imageUrl="./image/impact.jpg"
+                    image={require('./image/impact.jpg')}
                 />
                 <Section
                     title="Data and Insights"
