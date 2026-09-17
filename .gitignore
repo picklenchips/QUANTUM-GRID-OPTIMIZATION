@@ -56,3 +56,6 @@ nx.html
 /data/hifld/
 /data/climrr/*.geojson
 !data/fixtures/**
+
+# secrets -- MAPBOX_TOKEN etc, see .env.example
+.env

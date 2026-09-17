@@ -54,6 +54,7 @@ dependencies:
 #   web/opengridmap_source.html.  Run: uvicorn api.main:app --reload --port 8000
     - fastapi
     - "uvicorn[standard]"
+    - python-dotenv               # loads .env for MAPBOX_TOKEN etc
     - pandapower[plotting,performance]>=3.5,<4  # see note above; 3.5.4 = numpy<2.5, pandas~=2.3
     - dwave-ocean-sdk>=9,<10    # dwavebinarycsp removed in 9.0.0 -- pin deliberately; 9.x is PyPI-only
     - gridfm-datakit            # PF/OPF data generation (data/gridfm_datakit_hook.py)

@@ -3,6 +3,8 @@ import pandas as pd
 import pandapower as pp
 import pandapower.auxiliary as aux  # for pandapowerNet typing
 import pandapower.plotting.plotly as ppl
+from dotenv import load_dotenv
+load_dotenv()
 pd.options.display.max_rows = 20
 from glob import glob
 from collections import defaultdict

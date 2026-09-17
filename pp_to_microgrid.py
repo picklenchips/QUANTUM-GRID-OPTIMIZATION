@@ -44,7 +44,9 @@ import queue
 
 # Mapbox tokens were previously hardcoded here and committed to a public
 # repo -- treat those as compromised, rotate them in the Mapbox dashboard.
-# Set MAPBOX_TOKEN in the environment before running anything that plots.
+# Set MAPBOX_TOKEN in .env (see .env.example) before running anything that plots.
+from dotenv import load_dotenv
+load_dotenv()
 fullAccess = os.environ.get("MAPBOX_TOKEN", "")
 if fullAccess:
     ppl.set_mapbox_token(fullAccess)
