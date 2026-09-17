@@ -50,7 +50,7 @@ import sys, os, json, math
 import pandas as pd
 import pandapower as pp
 import pandapower.auxiliary as aux  # for pandapowerNet typing
-import pandapower.plotting as ppplot
+import pandapower.plotting.plotly as ppl
 from glob import glob
 from collections import defaultdict
 pd.options.display.max_rows = 20
@@ -355,12 +355,10 @@ if __name__ == '__main__':
         print('saved sqlite to ', name)
 
     if plot:
-        # do NOT hardcode a Mapbox token here -- pp_to_microgrid.py/psse_to_pp.py/transnet_to_pp.py
-        # already hardcode a compromised one (see docs/versions/V0_SUMMARY.md known issues); set
-        # MAPBOX_TOKEN yourself instead of repeating that mistake.
+        # Plotly for all plotting (see repo CLAUDE.md). Do NOT hardcode a Mapbox token; set
+        # MAPBOX_TOKEN yourself for the on_map basemap (on_map=False needs no token).
         token = os.environ.get('MAPBOX_TOKEN')
-        if not token:
-            print('set MAPBOX_TOKEN env var to enable plotting')
-        else:
-            ppplot.set_mapbox_token(token)
-            ppplot.simple_plot(net, plot_gens=True, plot_loads=True)
+        if token:
+            ppl.set_mapbox_token(token)
+        ppl.simple_plotly(net, on_map=bool(token), use_line_geodata=False, figsize=1,
+                          auto_open=True).show()

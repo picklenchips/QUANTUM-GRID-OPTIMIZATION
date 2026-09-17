@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node_modules/.bin/tsc --noEmit*)",
+      "Bash(npm run diagrams*)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run lint)",
+      "Bash(conda*)",
+      "Bash(pip*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git stage*)",
+      "Bash(git commit*)",
+      "Bash(grep*)",
+      "Bash(ls*)",
+      "Bash(cd*)",
+      "Bash(find*)",
+      "Bash(awk*)",
+      "Bash(cat*)",
+      "Bash(mkdir*)",
+      "Bash(git -C*)",
+      "Bash(npm *)"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/hooks/ralph-loop-trigger.sh\""
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "claude-mem@thedotmack": true,
+    "caveman@caveman": true,
+    "superpowers@superpowers-dev": true,
+    "learning-output-style@claude-code-plugins": true,
+    "pr-review-toolkit@claude-code-plugins": true,
+    "ralph-wiggum@claude-code-plugins": true,
+    "frontend-design@claude-plugins-official": true
+  }
+}

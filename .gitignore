@@ -40,3 +40,19 @@
 # internal tracking that's unnecessary to commit
 __pycache__
 .vscode
+
+# plotly / pandapower.plotting.plotly scratch output
+temp-plot.html
+*.plotly.html
+nx.html
+
+# dataset download caches (see data/*_to_pp.py / data/*_hook.py -- re-fetchable, not source)
+# small offline test data lives in data/fixtures/ and IS committed
+/.cache/
+/data/gridsfm/
+/data/opfdata/
+/data/pglearn/
+/data/gridfm/
+/data/hifld/
+/data/climrr/*.geojson
+!data/fixtures/**

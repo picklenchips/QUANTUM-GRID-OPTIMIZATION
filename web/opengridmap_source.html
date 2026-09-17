@@ -1,580 +1,174 @@
 <!DOCTYPE html>
-<html>
-
+<html lang="en">
 <head>
-        
-    <meta charset="utf-8">
-    <title>PowerMap</title>
-        
-    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
-        
-    <link href="https://api.mapbox.com/mapbox-gl-js/v3.5.1/mapbox-gl.css" rel="stylesheet">
-        
-    <script src="https://api.mapbox.com/mapbox-gl-js/v3.5.1/mapbox-gl.js"></script>
-        
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-        }
-
-        #map {
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            width: 100%;
-        }
-
-        .buttons {
-            position: absolute;
-            background-color: #d12064;
-            border-radius: 8px;
-            border-style: none;
-            box-sizing: border-box;
-            color: #FFFFFF;
-            cursor: pointer;
-            display: inline-block;
-            font-family: "Haas Grot Text R Web", "Helvetica Neue", Helvetica, Arial, sans-serif;
-            font-size: 14px;
-            font-weight: 500;
-            height: 40px;
-            line-height: 20px;
-            list-style: none;
-            margin: 10px;
-            outline: none;
-            padding: 10px 16px;
-            position: relative;
-            text-align: center;
-            text-decoration: none;
-            transition: color 100ms;
-            vertical-align: baseline;
-            user-select: none;
-            -webkit-user-select: none;
-            touch-action: manipulation;
-            left: 5px;
-        }
-
-        #filterButton {
-            margin-top: 25px;
-        }
-
-        .nav {
-            position: absolute;
-            color: #FFFFFF;
-            background: #d12064;
-            border-radius: 8px;
-            padding: 10px;
-            text-decoration: none;
-            outline: none;
-            font-size: 16px;
-            font-weight: 400;
-            left: 90px;
-            font-family: "Haas Grot Text R Web", "Helvetica Neue", Helvetica, Arial, sans-serif;
-        }
-
-        #filter {
-            display: none;
-            top: 25px;
-        }
-
-        #viewToggle {
-            display: none;
-            top: 85.5px;
-        }
-
-        #sub {
-            color: #0000ff;
-            background-color: #0000ff;
-        }
-
-        #plant {
-            color: #093E46;
-            background-color: #093E46;
-        }
-
-
-        #calcBox {
-            width: 150px;
-            position: absolute;
-            top: 200px;
-            left: 10px;
-            background-color: #d12064;
-            border-radius: 8px;
-            color: #FFFFFF;
-            font-family: "Haas Grot Text R Web", "Helvetica Neue", Helvetica, Arial, sans-serif;
-            padding: 15px;
-            display: none;
-        }
-
-        p {
-            font-family: 'Open Sans';
-            margin: 0;
-            font-size: 13px;
-        }
-
-        .textInput {
-            width: 100px;
-            height: 20px;
-            margin: 5px;
-        }
-
-        #queryButton {
-            border-color: #FFFFFF;
-            border-width: 2px;
-            background-color: black;
-        }
-
-        #invalid {
-            color: white;
-            margin-top: 5px;
-            font-size: 20px;
-            display: none;
-        }
-    </style>
+<meta charset="utf-8">
+<title>QPGrid PowerMap</title>
+<meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+<!-- MapLibre GL JS: renders OpenInfraMap's vector (pbf) tiles natively. No Mapbox token needed. -->
+<link href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<!-- interaction + viz libs (classic globals, no bundler): terra-draw, cytoscape, plotly -->
+<script src="https://unpkg.com/terra-draw@1.33.0/dist/terra-draw.umd.js"></script>
+<script src="https://unpkg.com/terra-draw-maplibre-gl-adapter@1.4.1/dist/terra-draw-maplibre-gl-adapter.umd.js"></script>
+<script src="https://unpkg.com/cytoscape@3.34.3/dist/cytoscape.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root{ --accent:#d12064; --panel:#ffffff; --ink:#1a1a1f; --muted:#6b6b76; --line:#e3e3e8; }
+  @media (prefers-color-scheme:dark){
+    :root{ --panel:#1e1e26; --ink:#ececf0; --muted:#9a9aa6; --line:#2c2c36; }
+  }
+  html,body{margin:0;padding:0;height:100%;font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+  #map{position:absolute;inset:0}
+  .btns{position:absolute;top:10px;left:10px;z-index:2;display:flex;flex-direction:column;gap:8px}
+  .btns button{
+    background:var(--accent);border:none;border-radius:8px;color:#fff;cursor:pointer;
+    font-size:13px;font-weight:500;height:36px;padding:0 14px;text-align:left;
+    box-shadow:0 1px 4px rgba(0,0,0,.25);transition:filter .1s}
+  .btns button:hover{filter:brightness(1.08)}
+  .btns button.on{outline:2px solid #fff;outline-offset:-1px}
+  .panel{
+    position:absolute;left:150px;z-index:3;background:var(--panel);color:var(--ink);
+    border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px;
+    box-shadow:0 2px 12px rgba(0,0,0,.3);display:none;min-width:190px;max-width:320px;
+    max-height:80vh;overflow:auto}
+  .panel.open{display:block}
+  .panel h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .panel label{display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer}
+  .panel input[type=text],.panel input[type=number],.panel select{width:100%;box-sizing:border-box;margin:2px 0 6px;padding:5px 7px;
+    border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--ink)}
+  .panel .prow{display:flex;align-items:center;gap:8px}
+  .panel .prow span{flex:0 0 92px;color:var(--muted);font-size:12px}
+  .panel .prow input{margin:2px 0}
+  .panel button.act{height:30px;width:100%;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;margin-top:4px}
+  .panel button.act:disabled{opacity:.4;cursor:default}
+  #filter{top:10px}  #view{top:56px}  #box{top:102px}  #overlays{top:148px}  #optimize{top:194px}  #topology{top:240px}
+  .sw{display:inline-block;width:22px;height:3px;vertical-align:middle;margin-right:2px;border-radius:2px}
+  .status{position:absolute;right:10px;bottom:24px;z-index:2;background:var(--panel);color:var(--ink);
+    border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;opacity:.95}
+  .status b{color:var(--accent)}
+  .maplibregl-popup-content{font-size:12px;max-height:320px;overflow:auto}
+  .vlegend{position:absolute;left:10px;bottom:24px;z-index:2;background:var(--panel);color:var(--ink);
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.7;display:none}
+  .vlegend.open{display:block}
+  .vlegend b{display:block;font-size:10px;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
+  #tools{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:3;display:flex;gap:4px;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px;box-shadow:0 2px 12px rgba(0,0,0,.3)}
+  #tools button{background:transparent;color:var(--ink);border:1px solid var(--line);border-radius:6px;
+    font-size:12px;padding:5px 9px;cursor:pointer}
+  #tools button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .badge{position:absolute;right:10px;top:10px;z-index:3;font-size:11px;padding:5px 9px;border-radius:7px;
+    border:1px solid var(--line);background:var(--panel)}
+  .badge.ok{color:#0b8;border-color:#0b8}
+  .badge.off{color:var(--muted)}
+  #inview{position:absolute;left:50%;transform:translateX(-50%);top:52px;z-index:2;font-size:11px;color:var(--ink);
+    background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:4px 9px;opacity:.9}
+  #cy{width:290px;height:230px;border:1px solid var(--line);border-radius:8px;background:rgba(128,128,128,.06)}
+  .histrow{padding:4px 6px;border:1px solid var(--line);border-radius:6px;margin:3px 0;font-size:11px;cursor:pointer}
+  .histrow:hover{border-color:var(--accent)}
+  .note{color:var(--muted);margin-top:6px;font-size:11px}
+</style>
 </head>
-
 <body>
-    <div id="map"></div>
-
-    <button id="filterButton" class="buttons">Filter</button><br>
-    <button id="viewToggleButton" class="buttons">View</button><br>
-    <button id="boxButton" class="buttons">Box</button><br>
-
-    <div id="filter" class="nav">
-        <input id="powerlines" type="checkbox" checked="checked">
-        <label for="powerlines">Power Lines </label>
-        <input id="power-stations" type="checkbox" checked="checked">
-        <label for="power-stations"><a id="sub">O</a> Power Stations</label>
-        <input id="power_plant_point" type="checkbox" checked="checked">
-        <label for="power_plant_point"><a id="plant">O</a> Power Plants</label>
-    </div>
-
-    <div id="viewToggle" class="nav">
-        <input id="dark-v11" type="radio" name="rtoggle" value="dark">
-        <label for="dark-v11">dark</label>
-        <input id="light-v11" type="radio" name="rtoggle" value="light">
-        <label for="light-v11">light</label>
-        <input id="outdoors-v12" type="radio" name="rtoggle" value="outdoors">
-        <label for="outdoors-v12">outdoors</label>
-        <input id="streets-v12" type="radio" name="rtoggle" value="streets">
-        <label for="streets-v12">streets</label>
-    </div>
-
-    <div id="calcBox">
-        <p><b>Bounding Box Limits</b></p>
-        <p id="invalid">invalid</p><br>
-        <p>Left:</p> <input id="left" class="textInput" type="text" />
-        <p>Bottom</p> <input id="bottom" class="textInput" type="text" />
-        <p>Right:</p> <input id="right" class="textInput" type="text" />
-        <p>Top:</p> <input id="top" class="textInput" type="text" />
-        <!-- <button id="queryButton" class="buttons">Query</button> -->
-    </div>
-
-
-        
-    <script>
-        // Initialize the map
-        // was hardcoded to a public (pk.) token under a different Mapbox
-        // account than this project's own -- unclear provenance, removed.
-        // Substitute your own Mapbox public token below.
-        mapboxgl.accessToken = 'REPLACE_WITH_YOUR_MAPBOX_PUBLIC_TOKEN';
-        const map = new mapboxgl.Map({
-            container: 'map', // container id
-            style: 'mapbox://styles/mapbox/dark-v11', // style URL
-            projection: 'globe',
-            attributionControl: false,
-            center: [0, 0], // starting position [lng, lat]
-            zoom: 2, // starting zoom
-        });
-
-        function addLayers() {
-
-
-            map.setFog({
-                "range": [0.8, 8],
-                "color": "#dc9f9f",
-                "horizon-blend": 0.1,
-                "high-color": "#245bde",
-                "space-color": "#000000",
-                "star-intensity": 0.15
-            });
-
-
-            map.addSource('openmap', {
-                type: 'vector',
-                tiles: ['https://openinframap.org/tiles/{z}/{x}/{y}.pbf'],
-            });
-
-            map.addLayer({
-                'id': 'unknown',
-                'type': 'line',
-                'source': 'openmap',
-                'source-layer': 'power_line',
-                'layout': {},
-                'paint': {
-                    'line-color': '#FF6666',
-                    'line-width': .5
-                },
-                filter: ['!', ['has', 'voltage']]
-            });
-
-            map.addLayer({
-                'id': '0-10',
-                'type': 'line',
-                'source': 'openmap',
-                'source-layer': 'power_line',
-                'layout': {},
-                'paint': {
-                    'line-color': '#FF3333',
-                    'line-width': .75
-                },
-                filter: ['all', ['>=', ['number', ['get', 'voltage']], 0], ['<', ['number', ['get', 'voltage']], 10]]
-            });
-
-            map.addLayer({
-                'id': '10-25',
-                'type': 'line',
-                'source': 'openmap',
-                'source-layer': 'power_line',
-                'paint': {
-                    'line-color': '#FF0000',
-                    'line-width': 1
-                },
-                filter: ['all', ['>=', ['number', ['get', 'voltage']], 10], ['<', ['number', ['get', 'voltage']], 25]]
-            });
-
-            map.addLayer({
-                'id': '25-52',
-                'type': 'line',
-                'source': 'openmap',
-                'source-layer': 'power_line',
-                'paint': {
-                    'line-color': '#CC0000',
-                    'line-width': 1.25
-                },
-                filter: ['all', ['>=', ['number', ['get', 'voltage']], 25], ['<', ['number', ['get', 'voltage']], 52]]
-            });
-
-            map.addLayer({
-                'id': '52-132',
-                'type': 'line',
-                'source': 'openmap',
-                'source-layer': 'power_line',
-                'paint': {
-                    'line-color': '#990000',
-                    'line-width': 1.5
-                },
-                filter: ['all', ['>=', ['number', ['get', 'voltage']], 52], ['<', ['number', ['get', 'voltage']], 132]]
-            });
-
-            map.addLayer({
-                'id': '132-220',
-                'type': 'line',
-                'source': 'openmap',
-                'source-layer': 'power_line',
-                'paint': {
-                    'line-color': '#660000',
-                    'line-width': 1.75
-                },
-                filter: ['all', ['>=', ['number', ['get', 'voltage']], 132], ['<', ['number', ['get', 'voltage']], 220]]
-            });
-
-            map.addLayer({
-                'id': '220-330',
-                'type': 'line',
-                'source': 'openmap',
-                'source-layer': 'power_line',
-                'paint': {
-                    'line-color': '#330000',
-                    'line-width': 2
-                },
-                filter: ['all', ['>=', ['number', ['get', 'voltage']], 220], ['<', ['number', ['get', 'voltage']], 330]]
-            });
-
-            map.addLayer({
-                'id': '330-550',
-                'type': 'line',
-                'source': 'openmap',
-                'source-layer': 'power_line',
-                'paint': {
-                    'line-color': '#000000',
-                    'line-width': 2.25
-                },
-                filter: ['all', ['>=', ['number', ['get', 'voltage']], 330]] //, ['<=', ['number', ['get', 'voltage']], 550]]
-            });
-
-
-            map.addLayer({
-                'id': 'power-stations',
-                'type': 'circle',
-                'source': 'openmap',
-                'source-layer': 'power_substation_point',
-                'paint': {
-                    'circle-radius': 7,
-                    'circle-color': '#0000ff'
-                }
-            });
-            map.addLayer({
-                'id': 'power-station',
-                'type': 'fill',
-                'source': 'openmap',
-                'source-layer': 'power_substation',
-                'paint': {
-                    'fill-color': '#0000ff',
-                    'fill-opacity': 0.5
-                }
-            });
-            
-            map.addLayer({
-                'id': 'power_plant_point',
-                'type': 'circle',
-                'source': 'openmap',
-                'source-layer': 'power_plant_point',
-                'paint': {
-                    'circle-radius': 7,
-                    'circle-color': '#093E46'
-                }
-            });
-
-
-            map.addLayer({
-                id: 'all',
-                type: 'line',
-                source: 'openmap',
-                'source-layer': 'power_line',
-                paint: {
-                    'line-opacity': 0,
-                    'line-width': 10,
-                },
-            });
-
-            map.addLayer({
-                "id": "symbols",
-                "type": "symbol",
-                "source": "openmap",
-                "source-layer": 'power_line',
-                "layout": {
-                    "symbol-placement": "line",
-                    "text-font": ["Open Sans Regular"],
-                    "text-field": [
-                        "case",
-                        ["has", "voltage"],
-                        ["concat", ['get', 'voltage'], ' kV'],
-                        "Unknown voltage"
-                    ],
-                    "text-size": 16
-                }
-            });
-
-
-
-            function isValidLatitude(lat) {
-                return lat >= -90 && lat <= 90;
-            }
-
-            function isValidLongitude(lon) {
-                return lon >= -180 && lon <= 180;
-            }
-
-            function updateBox() {
-                var left = parseFloat(document.getElementById('left').value);
-                var bottom = parseFloat(document.getElementById('bottom').value);
-                var right = parseFloat(document.getElementById('right').value);
-                var top = parseFloat(document.getElementById('top').value);
-
-                blockChecked = document.getElementById('calcBox').style.display == 'block';
-
-
-                if (isValidLongitude(left) && isValidLatitude(bottom) && isValidLongitude(right) && isValidLatitude(top) && blockChecked) {
-                    var coordinates = [
-                        [left, bottom],
-                        [right, bottom],
-                        [right, top],
-                        [left, top],
-                        [left, bottom]
-                    ];
-                    document.getElementById('invalid').style.display = 'none';
-
-                } else {
-                    var coordinates = [
-                        [0, 0],
-                        [0, 0],
-                        [0, 0],
-                        [0, 0],
-                        [0, 0]
-                    ];
-                    document.getElementById('invalid').style.display = 'block';
-
-                }
-
-
-                if (map.getSource('box')) {
-                    map.getSource('box').setData({
-                        'type': 'Feature',
-                        'geometry': {
-                            'type': 'Polygon',
-                            'coordinates': [coordinates]
-                        }
-                    });
-                } else {
-                    map.addSource('box', {
-                        'type': 'geojson',
-                        'data': {
-                            'type': 'Feature',
-                            'geometry': {
-                                'type': 'Polygon',
-                                'coordinates': [coordinates]
-                            }
-                        }
-                    });
-
-                    map.addLayer({
-                        'id': 'box',
-                        'type': 'fill',
-                        'source': 'box',
-                        'layout': {},
-                        'paint': {
-                            'fill-color': 'white',
-                            'fill-opacity': 0.5
-                        }
-                    });
-                }
-
-
-            }
-
-            document.getElementById('left').addEventListener('input', updateBox);
-            document.getElementById('bottom').addEventListener('input', updateBox);
-            document.getElementById('right').addEventListener('input', updateBox);
-            document.getElementById('top').addEventListener('input', updateBox);
-            document.getElementById('boxButton').addEventListener('click', updateBox);
-
-
-
-            //using: https://stackoverflow.com/a/40891062/8565438
-            const popup = new mapboxgl.Popup({
-                closeButton: true,
-                closeOnClick: true
-            });
-
-            map.on('click', 'all', (e) => {
-                map.getCanvas().style.cursor = 'pointer';
-
-                const feature = e.features[0];
-
-                let popupContent = '';
-                for (const property in feature.properties) {
-                    if (feature.properties[property] !== "") {
-                        popupContent += `<strong>${property}:</strong> ${feature.properties[property]}<br>`;
-                    }
-                }
-
-                popup.setLngLat(e.lngLat).setHTML(popupContent).addTo(map);
-            });;
-
-
-            map.on('click', 'power-station', (e) => {
-                map.getCanvas().style.cursor = 'pointer';
-
-                const feature = e.features[0];
-
-                let popupContent = '';
-                for (const property in feature.properties) {
-                    if (feature.properties[property] !== "") {
-                        popupContent += `<strong>${property}:</strong> ${feature.properties[property]}<br>`;
-                    }
-                }
-            });
-
-            map.on('click', 'power_plant_point', (e) => {
-                map.getCanvas().style.cursor = 'pointer';
-
-                const feature = e.features[0];
-
-                let popupContent = '';
-                for (const property in feature.properties) {
-                    if (feature.properties[property] !== "") {
-                        popupContent += `<strong>${property}:</strong> ${feature.properties[property]}<br>`;
-                    }
-                }
-
-                popup.setLngLat(e.lngLat).setHTML(popupContent).addTo(map);
-            });;
-
-            // Add a hover interaction to change the cursor type.
-            map.on('mouseenter', 'all', function () {
-                map.getCanvas().style.cursor = 'pointer';
-            });
-            map.on('mouseenter', 'power-stations', function () {
-                map.getCanvas().style.cursor = 'pointer';
-            });
-            map.on('mouseenter', 'power_plant_point', function () {
-                map.getCanvas().style.cursor = 'pointer';
-            });
-
-            map.on('mouseleave', 'all', function () {
-                map.getCanvas().style.cursor = '';
-            });
-            map.on('mouseleave', 'power-stations', function () {
-                map.getCanvas().style.cursor = '';
-            });
-            map.on('mouseleave', 'power_plant_point', function () {
-                map.getCanvas().style.cursor = '';
-            });
-        };
-
-        map.on('style.load', () => {
-            addLayers();
-        });
-
-
-
-
-        document.getElementById('powerlines').addEventListener('change', (e) => {
-            map.setLayoutProperty('unknown', 'visibility', e.target.checked ? 'visible' : 'none');
-            map.setLayoutProperty('0-10', 'visibility', e.target.checked ? 'visible' : 'none');
-            map.setLayoutProperty('10-25', 'visibility', e.target.checked ? 'visible' : 'none');
-            map.setLayoutProperty('25-52', 'visibility', e.target.checked ? 'visible' : 'none');
-            map.setLayoutProperty('52-132', 'visibility', e.target.checked ? 'visible' : 'none');
-            map.setLayoutProperty('132-220', 'visibility', e.target.checked ? 'visible' : 'none');
-            map.setLayoutProperty('220-330', 'visibility', e.target.checked ? 'visible' : 'none');
-            map.setLayoutProperty('330-550', 'visibility', e.target.checked ? 'visible' : 'none');
-        });
-
-        document.getElementById('power-stations').addEventListener('change', (e) => {
-            map.setLayoutProperty('power-stations', 'visibility', e.target.checked ? 'visible' : 'none');
-        });
-
-        document.getElementById('power_plant_point').addEventListener('change', (e) => {
-            map.setLayoutProperty('power_plant_point', 'visibility', e.target.checked ? 'visible' : 'none');
-        });
-
-        document.querySelectorAll('input[name="rtoggle"]').forEach((input) => {
-            input.addEventListener('change', (e) => {
-                const style = `mapbox://styles/mapbox/${e.target.value}-v11`;
-                map.setStyle(style);
-                map.on('style.load', () => {
-                    addLayers();
-                });
-            });
-        });
-
-        document.getElementById('filterButton').addEventListener('click', () => {
-            const filterDiv = document.getElementById('filter');
-            filterDiv.style.display = filterDiv.style.display === 'block' ? 'none' : 'block';
-        });
-
-        document.getElementById('viewToggleButton').addEventListener('click', () => {
-            const viewToggleDiv = document.getElementById('viewToggle');
-            viewToggleDiv.style.display = viewToggleDiv.style.display === 'block' ? 'none' : 'block';
-        });
-
-        document.getElementById('boxButton').addEventListener('click', () => {
-            const calculationBox = document.getElementById('calcBox');
-            calculationBox.style.display = calculationBox.style.display === 'block' ? 'none' : 'block';
-        });
-
-    </script>
+<div id="map"></div>
+
+<div class="btns">
+  <button id="bFilter">Power layers</button>
+  <button id="bView">Basemap</button>
+  <button id="bBox">Bounding box</button>
+  <button id="bOverlays">QPGrid overlays</button>
+  <button id="bOpt">Optimize</button>
+  <button id="bTopo">Topology</button>
+  <button id="bLegend">Voltage key</button>
+</div>
+
+<div id="tools">
+  <button data-mode="select" class="on">Select</button>
+  <button data-mode="draw-rect">Rectangle</button>
+  <button data-mode="draw-lasso">Lasso</button>
+  <button data-mode="drag-bus">Drag bus</button>
+</div>
+
+<div id="inview">— substations · — line segments in view</div>
+<div id="backendBadge" class="badge off">backend: …</div>
+
+<div id="filter" class="panel">
+  <h4>OpenInfraMap layers</h4>
+  <label><input type="checkbox" id="fLines" checked> Power lines (voltage-tiered)</label>
+  <label><input type="checkbox" id="fLabels" checked> Voltage labels</label>
+  <label><input type="checkbox" id="fSubs" checked> <a style="color:#3d6bff">■</a> Substations</label>
+  <label><input type="checkbox" id="fPlants" checked> <a style="color:#0b7">●</a> Power plants</label>
+</div>
+
+<div id="view" class="panel">
+  <h4>Basemap</h4>
+  <label><input type="radio" name="bm" value="dark" checked> dark</label>
+  <label><input type="radio" name="bm" value="light"> light</label>
+  <label><input type="radio" name="bm" value="streets"> streets</label>
+  <label><input type="radio" name="bm" value="outdoors"> outdoors (topo)</label>
+  <label style="margin-top:6px"><input type="checkbox" id="globe"> globe projection</label>
+</div>
+
+<div id="box" class="panel">
+  <h4>Bounding box <span id="boxbad" style="color:var(--accent);display:none">— invalid</span></h4>
+  W <input id="bxW" type="text" placeholder="-121.95">
+  S <input id="bxS" type="text" placeholder="38.08">
+  E <input id="bxE" type="text" placeholder="-121.73">
+  N <input id="bxN" type="text" placeholder="38.25">
+  <button class="act" id="bxFit">draw + fit</button>
+  <button class="act" id="bxLoad" disabled>load full detail (Overpass)</button>
+  <div class="note">also: shift-drag on the map, or the Rectangle tool</div>
+  <div class="note" id="bxNote"></div>
+</div>
+
+<div id="overlays" class="panel">
+  <h4>QPGrid pipeline output <span style="color:var(--muted)">(web/data/)</span></h4>
+  <label><input type="checkbox" id="oNet" checked> <span class="sw" style="background:#22d3ee"></span> converted pandapower network</label>
+  <label><input type="checkbox" id="oOsm" checked> <span class="sw" style="background:#ff9f1c"></span> Overpass hook output</label>
+  <label><input type="checkbox" id="oFwi"> <span class="sw" style="background:linear-gradient(90deg,#2c7fb8,#ffffb2,#bd0026)"></span> ClimRR fire-weather index</label>
+  <div class="note" id="ovNote">run notebooks/tooling_integration.ipynb to (re)generate</div>
+</div>
+
+<div id="optimize" class="panel">
+  <h4>Optimize <span id="backendInline" style="color:var(--muted)"></span></h4>
+  <div class="note" id="optNet">network: demo (minimal example)</div>
+  <label class="prow"><span>problem</span>
+    <select id="optKind"><option value="qubo">microgrid QUBO</option><option value="uc">unit commitment</option></select>
+  </label>
+  <label class="prow" id="optQuboRow"><span>lambda</span><input id="optLambd" type="number" value="1" step="0.1"></label>
+  <label class="prow" id="optUcRow" style="display:none"><span>demand</span><input id="optDemand" type="text" placeholder="[300,320,...]"></label>
+  <label class="prow"><span>optimizer</span><select id="optPick"></select></label>
+  <div class="note" id="optDoc"></div>
+  <div id="optParams"></div>
+  <button class="act" id="optRun">run</button>
+  <div class="note" id="optNote"></div>
+  <div id="optConv"></div>
+  <div id="optScatter"></div>
+  <h4 style="margin-top:10px">run history <span id="optClearHist" style="cursor:pointer;color:var(--accent)">clear</span></h4>
+  <div id="optHist"></div>
+</div>
+
+<div id="topology" class="panel">
+  <h4>Topology graph</h4>
+  <div class="note" id="topoNote">load a network to build the graph</div>
+  <div id="cy"></div>
+  <div class="note">electrical adjacency, geography-independent. Selection syncs with the map.</div>
+</div>
+
+<div id="vlegend" class="vlegend">
+  <b>Line voltage</b>
+  <div><span class="sw" style="background:#ff9090"></span> unknown</div>
+  <div><span class="sw" style="background:#ff5a5a"></span> &lt; 25 kV</div>
+  <div><span class="sw" style="background:#e03030"></span> 25–132 kV</div>
+  <div><span class="sw" style="background:#a01818"></span> 132–330 kV</div>
+  <div><span class="sw" style="background:#111"></span> &ge; 330 kV</div>
+</div>
+
+<div class="status" id="status">tooling: <b id="stx">…</b></div>
+
+<script src="js/api-client.js"></script>
+<script src="js/map-init.js"></script>
+<script src="js/selection-tools.js"></script>
+<script src="js/topology-panel.js"></script>
+<script src="js/results-panel.js"></script>
 </body>
-
 </html>

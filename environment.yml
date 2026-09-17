@@ -1,48 +1,62 @@
 # to create new miniconda/anaconda environment:
-## conda env create -f environment.yml; conda activate qpowergrid
+##   conda env create -f environment.yml --solver=libmamba
+##   conda activate qpgrid
+# (the classic conda solver takes >20 min on this dependency set; libmamba is ~3 min.)
 name: qpgrid
 channels:
-  - defaults
   - conda-forge
+  - defaults
 dependencies:
-# classiq only runs up to 3.13, not 3.14
-# so we only install python up to 3.13
-  - python==3.13 
-  - ipykernel  # for jupyter notebooks
+# python 3.12: highest that satisfies BOTH classiq (<=3.13) and gridfm-datakit (>=3.10,<3.13)
+  - python=3.12
+  - ipykernel        # jupyter notebooks
+  - jupyter          # nbconvert --execute for notebooks/tooling_integration.ipynb
   - marimo
-  - numpy
-# DOWNLOAD FROM OSM
+  - numpy<2.5        # pandapower 3.5 wants numpy <2.5,>=1.26
+  - pandas>=2.3,<3   # pandapower 3.5 pins pandas ~=2.3 (pandas 3.0 breaks it)
+  - scipy
+# DOWNLOAD FROM OSM / HTTP APIs (OPFData GCS bucket, ClimRR, HIFLD archive, Overpass)
   - requests
 # PANDAPOWER + REQUIREMENTS
-  - pandapower
+#   pandapower itself is pip-installed below: conda-forge stops at 3.2.1, the repo's converters
+#   target the 3.5 line (net.bus['geo'] GeoJSON string, no bus_geodata table).
   - pytest
-  - scipy
-  - pandas
   - packaging
   - tqdm
   - deepdiff
-  - psycopg2  # PostgreSQL adapter
-  - networkx  # for general graphs
-  - numba     # improves performance
-  - ortools-python   # google mixed-integer programming optimization tools (conda-forge package is "ortools-python", not "ortools")
+  - psycopg2         # PostgreSQL adapter
+  - networkx         # general graphs
+  - numba            # perf
+  - ortools-python   # conda-forge package name is "ortools-python", not "ortools"
 ### pandapower.plotting
   - python-igraph
   - geopandas
   - geojson
-# PLOTTING
-  - matplotlib
-  - python-igraph  # plotting
+# PLOTTING -- Plotly only in repo code (see CLAUDE.md); matplotlib stays as a pandapower dependency
   - plotly
-  - nbformat       # plotly in ipynb
+  - nbformat         # plotly figures in .ipynb
+  - python-kaleido   # plotly static image export (fig.write_image) for util.savefig
+  - matplotlib       # transitive: pandapower.plotting (non-plotly) imports it
   - geopy
-# QUANTUM
-#  - pip  # to install classiq
-#  - pip:
-#    - classiq  
-  # or qiskit:
-#  - qiskit-terra  # conda-forge::
-  - dwave-ocean-sdk>=9,<10  # dwavebinarycsp was removed in 9.0.0 -- pin deliberately, not accidentally
-# OTHERS
-#  - pyvis   # conda-forge::
-#  - pytorch  # for GNN
-  # to install classiq:
+# DATASET / TOOLING HOOKS (docs/07-TOOLING-UPDATES.md, docs/08-TOOLING-INTEGRATION.md)
+  - huggingface_hub  # GridSFM + PGLearn downloads (data/gridsfm_to_pp.py, data/pglearn_to_pp.py)
+  - h5py             # PGLearn HDF5 primal/dual solution files (data/pglearn_to_pp.py)
+  - pyarrow          # HIFLD Data-Rescue-Project parquet mirror (data/hifld_archive.py)
+  - pypsa>=1.0       # PyPSA v1.0 stochastic optimization bridge (pypsa_bridge.py)
+  - highspy          # open LP/MILP solver (pypsa_bridge.py + algos "highs" optimizer, via scipy.optimize.milp)
+# QUANTUM -- gate-model (algos "qaoa" / "vqe" / "numpy_min_eigen"); D-Wave annealing is pip: below
+  - qiskit>=2.1,<3
+  - qiskit-aer>=0.15         # statevector/shot-noise simulators (algos backend="aer")
+  - qiskit-algorithms>=0.3   # QAOA / VQE / NumPyMinimumEigensolver
+  - pip
+  - pip:
+# WEB BACKEND -- local FastAPI bridge (api/): optimizer + network-from-selection API for
+#   web/opengridmap_source.html.  Run: uvicorn api.main:app --reload --port 8000
+    - fastapi
+    - "uvicorn[standard]"
+    - pandapower[plotting,performance]>=3.5,<4  # see note above; 3.5.4 = numpy<2.5, pandas~=2.3
+    - dwave-ocean-sdk>=9,<10    # dwavebinarycsp removed in 9.0.0 -- pin deliberately; 9.x is PyPI-only
+    - gridfm-datakit            # PF/OPF data generation (data/gridfm_datakit_hook.py)
+    - juliapkg<0.1.26           # gridfm-datakit 1.0.5 imports juliapkg.deps.run_julia, removed in 0.1.26
+    - gurobipy>=11,<14          # algos "gurobi" optimizer (MIQP/MILP); ships a size-limited trial license, no key needed
+#    - classiq                  # SDK ceiling is python 3.13; uncomment for Classiq work

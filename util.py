@@ -12,13 +12,8 @@ Defines useful utility functions and constants. Run printModule(util) after impo
 """
 import numpy as np
 from glob import glob
-from cycler import cycler
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick
-import matplotlib.colors as mcolors
-#import matplotlib.lines as mlines
-#import plotly.graph_objects as go
+import plotly.io as pio
+import plotly.graph_objects as go
 
 import sys, time, os
 
@@ -74,10 +69,15 @@ CVALS = justADictionary("Useful Physics constants, indexed in class for easy acc
 # IBM's colorblind-friendly colors
 #           |   Red  |   Blue  |  Orange |  Purple | Yellow  |   Green |   Teal  | Grey
 hexcolors = ['DC267F', '648FFF', 'FE6100', '785EF0', 'FFB000', '009E73', '3DDBD9', '808080']
-mpl.rcParams['axes.prop_cycle'] = cycler('color', [mcolors.to_rgba('#' + c) for c in hexcolors])
+pio.templates["qpgrid"] = go.layout.Template(layout=dict(colorway=['#'+c for c in hexcolors]))
+pio.templates.default = "plotly_white+qpgrid"
 
-def savefig(title):
-    plt.savefig(SAVEDIR + title + SAVEEXT, bbox_inches='tight')
+def savefig(fig, title):
+    """Save Plotly figure to image via kaleido, fall back to HTML on exception."""
+    try:
+        fig.write_image(SAVEDIR + title + SAVEEXT)
+    except Exception:
+        fig.write_html(SAVEDIR + title + ".html")
 
 
 # -- GENERAL FUNCTIONS -- #

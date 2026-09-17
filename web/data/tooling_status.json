@@ -1,0 +1,53 @@
+{
+ "generated": "2026-08-27",
+ "rows": [
+  {
+   "tool": "Microsoft GridSFM",
+   "module": "data/gridsfm_to_pp.py",
+   "status": "pass",
+   "detail": "11 buses, runpp converged, |V| 0.999\u20131.000 pu"
+  },
+  {
+   "tool": "DeepMind OPFData",
+   "module": "data/opfdata_to_pp.py",
+   "status": "pass",
+   "detail": "case14, ref AC-OPF obj $2123; pandapower runpp at the reference setpoints reproduces |V| to RMS 0.0058 pu (converter is faithful)"
+  },
+  {
+   "tool": "PGLearn",
+   "module": "data/pglearn_to_pp.py",
+   "status": "pass",
+   "detail": "pglib_opf_case14_ieee, 14 buses; ref ACOPF has 8 primal + 17 dual variable groups, obj 2178"
+  },
+  {
+   "tool": "gridfm-datakit",
+   "module": "data/gridfm_datakit_hook.py",
+   "status": "pass",
+   "detail": "import OK + schema-valid config built; a real run (LIVE=True) generated 3-scenario PF parquet for case14 in testing (needs a one-time Julia/PowerModels.jl install)"
+  },
+  {
+   "tool": "PyPSA v1.0",
+   "module": "pypsa_bridge.py",
+   "status": "pass",
+   "detail": "v1.3.0 2-stage stochastic solve ok; robust 1st-stage gen sizing {'gen0': 8.1} MW (covers the 1.35x peak); CVaR(0.9) risk premium +54"
+  },
+  {
+   "tool": "OpenInfraMap / OSM",
+   "module": "data/openinframap_hook.py",
+   "status": "pass",
+   "detail": "Overpass query -> 671 power features (144 lines, 511 nodes); vector-tile layer wired"
+  },
+  {
+   "tool": "HIFLD Open (archived)",
+   "module": "data/hifld_archive.py",
+   "status": "pass",
+   "detail": "archive resolved: Electric_Power_Transmission_Lines.parquet"
+  },
+  {
+   "tool": "ClimRR (Argonne)",
+   "module": "data/climrr_overlay.py",
+   "status": "pass",
+   "detail": "synthetic CA fixture: 399 cells joined to 336/336 transnet California buses; mid-century FWI 11.0\u201344.2"
+  }
+ ]
+}

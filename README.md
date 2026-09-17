@@ -1,72 +1,83 @@
-# Quantum-AI-for-Climate
-Womanium Quantum+AI 2024 Projects
+# QPGrid
 
-**Please review the participation guidelines [here](https://github.com/womanium-quantum/Quantum-AI-2024) before starting the project.**
+Electrical grids run on optimization math that predates the renewable, distributed, bidirectional grid it now has to manage. QPGrid is a testbed for the opposite bet: take real grid topology, formulate its hardest problems as QUBO/Ising instances, and see how much of it a quantum annealer can actually solve better.
 
-_**Do NOT delete/ edit the format of this read.me file.**_
+No hackathon, no team, no deadline — see [Origin](#origin). Just the research.
 
-_**Include all necessary information only as per the given format.**_
+## What this is
 
-## Project Information:
+A pipeline: real open-source grid data → `pandapower` network → optimization (classical *and* quantum) → an interface that makes the result legible to someone who isn't a power-systems engineer. Two problem classes anchor it:
 
-### Team Size:
-  - Maximum team size = 4
-  - While individual participation is also welcome, we highly recommend team participation :)
+- **Microgrid formation** — partition a grid into self-sufficient sub-networks. QUBO-formulated, solved via D-Wave quantum annealing. Designed and mostly implemented.
+- **Optimal power flow (ACOPF)** — the open question: *can a quantum computer find better ACOPF solutions than classical interior-point methods, and where's the actual advantage?* Not yet started. This is the interesting one.
 
-### Eligibility:
-  - All nationalities, genders, and age groups are welcome to participate in the projects.
-  - All team participants must be enrolled in Womanium Quantum+AI 2024.
-  - Everyone is eligible to participate in this project and win Womanium grants.
-  - All successful project submissions earn the Womanium Project Certificate.
-  - Best participants win Womanium QSL fellowships with NNL. Please review the eligibility criteria for QSL fellowships in the project description below.
+Full framing: [docs/00-VISION.md](docs/00-VISION.md).
 
-### Project Description:
-  - Click [here](https://drive.google.com/file/d/1yoY_venPkNStjcDu0Na0HYhgO6CvVYdM/view?usp=sharing) to view the project description.
-  - YouTube recording of project description - [link](https://youtu.be/ka2RgUYo83c?si=MUb_dwTVfP1FV_47)
+## Architecture
 
-## Project Submission:
-All information in this section will be considered for project submission and judging.
+```mermaid
+flowchart LR
+    OSM[OSM] --> PP
+    PSSE[PSS/E] --> PP
+    TN[transnet] --> PP["pandapower<br/>ElectricalGrid"]
+    PP --> QUBO[QUBO formulation]
+    QUBO --> Quantum["D-Wave<br/>quantum annealing"]
+    QUBO --> Classical[Classical solve]
+    Quantum --> App[Web map / app]
+    Classical --> App
+```
 
-Ensure your repository is public and submitted by **August 9, 2024, 23:59pm US ET**.
+Three data-format converters feed one graph representation; one formulation, two solvers; one surface for the result. Detail: [docs/01-ARCHITECTURE.md](docs/01-ARCHITECTURE.md) · algorithm survey: [docs/02-ALGORITHMS.md](docs/02-ALGORITHMS.md) · literature: [docs/03-LITERATURE.md](docs/03-LITERATURE.md) · data sources: [docs/04-DATA-SOURCES.md](docs/04-DATA-SOURCES.md).
 
-Ensure your repository does not contain any personal or team tokens/access information to access backends. Ensure your repository does not contain any third-party intellectual property (logos, company names, copied literature, or code). Any resources used must be open source or appropriately referenced.
+## State of the code
 
-### Team Information:
-Team Member 1: 
- - Full Name: Benjamin Kroul
- - Womanium Program Enrollment ID: WQ24-x7CcgxUOPWpvHVd
+Honest snapshot, not a sales pitch — full detail in [docs/versions/V0_SUMMARY.md](docs/versions/V0_SUMMARY.md):
 
-Team Member 2: 
- - Full Name: Xin Lan Zheng
- - Womanium Program Enrollment ID: WQ24-BUulB1qoioS2BsJ
+- **Works today**: `transnet` → `pandapower` conversion, end to end. PSS/E and OSM converters parse real data but stop short of building the network.
+- **Designed, currently broken**: the microgrid QUBO math (modularity + self-reliance objective, derived in `docs/../notebooks/microgrids.ipynb`, implemented in `pp_to_microgrid.py`) doesn't run — `pp_to_microgrid.py` has a syntax error blocking everything downstream of it. That's the first fix, and it's small.
+- **Scaffold, not product yet**: the mobile app and web map are real UI with one real feature (an embedded interactive grid map) — optimization tools aren't wired to either yet.
 
-Team Member 3: 
- - Full Name:
- - Womanium Program Enrollment ID: WQ24-
+This is a snapshot, not a complaint — a broken syntax error and two `NotImplementedError` stubs between here and a working quantum-vs-classical ACOPF comparison is a good place to be starting from.
 
-Team Member 4: 
- - Full Name: 
- - Womanium Program Enrollment ID: WQ24-
+## Quickstart
 
-### Project Solution:
-In this project we demonstrate the potential of quantum computing in optimizing modern electrical grid systems. The overarching goal was twofold: first, to implement state-of-the-art quantum optimization methods that show significant promise in accelerating electrical grid operations in the near future, even on noisy intermediate-scale quantum computers (NISQ), and second, to make a platform that demystifies both electrical grid management and its optimization and allows everyone the access to interact with and learn from these optimizations.
+```sh
+conda env create -f environment.yml --solver=libmamba   # classic solver takes >20 min on this dep set
+conda activate qpgrid
+```
 
-We want to make an accessible portal to show others this potential and pave a pathway for current grid providers to consider quantum computing solutions when planning grid modernization. 
+Python 3.12 (highest that satisfies both Classiq ≤3.13 and gridfm-datakit <3.13). `pandapower` is pip-installed from `environment.yml`'s `pip:` section — conda-forge stops at 3.2.1, the converters target the 3.5 line. D-Wave Ocean SDK 9.x included; a D-Wave Leap account/API token is only needed for real QPU access — `SimulatedAnnealingSampler` (`dimod`) works with no account for local dev.
 
-1. Translate from open-source data to a `pandapower` network for classical electrical grid modelling
-   1. translating from [transnet-models](https://github.com/OpenGridMap/transnet-models) has been implemented
-   1. TODO: translate from PSS/E power modelling format
-   1. TODO: translate directly from OSM data by inferring electrical circuits in real-time, like [transnet/app](https://github.com/OpenGridMap/transnet/tree/master/app)
-1. Run various optimization algorithms on the network classically
-1. Use D-Wave quantum annealing to accelerate the optimizations with quantum computing
+External datasets/tools from [docs/07-TOOLING-UPDATES.md](docs/07-TOOLING-UPDATES.md) each have a Python hook (`data/*_to_pp.py`, `pypsa_bridge.py`) — see [docs/08-TOOLING-INTEGRATION.md](docs/08-TOOLING-INTEGRATION.md); [notebooks/tooling_integration.ipynb](notebooks/tooling_integration.ipynb) runs all of them against bundled offline fixtures and [web/tooling_dashboard.html](web/tooling_dashboard.html) shows the status + a converted network on an OpenInfraMap basemap.
 
-We solve the following optimization problems with quantum methods:
-1. Self-sufficient microgrid formation with predicted loads
-1. TODO: Optimal AC power flow equation solving
+**Plotly for plotting** — charts via `plotly.graph_objects`, grid networks via `pandapower.plotting.plotly`.
 
-### Project Presentation Deck:
-[_Link a 5min. presentation recording or deck here._](https://docs.google.com/presentation/d/15lL3aQ6CYwhdSUpaZ9nDa9ytmNhJPK7m2RATeNz-G9s/edit?usp=sharing)
+Mobile app (separate Node project, not part of the conda env):
+
+```sh
+cd QPGrid && npm install && npx expo start
+```
+
+## Docs
+
+| Doc | Covers |
+|---|---|
+| [docs/00-VISION.md](docs/00-VISION.md) | Why this exists, the four pillars, the core research question |
+| [docs/01-ARCHITECTURE.md](docs/01-ARCHITECTURE.md) | Data → graph → optimize → map/app, layer by layer |
+| [docs/02-ALGORITHMS.md](docs/02-ALGORITHMS.md) | Problem survey — what's formulated, what tool fits each |
+| [docs/03-LITERATURE.md](docs/03-LITERATURE.md) | ~20 papers, one-line takeaway each, organized by topic |
+| [docs/04-DATA-SOURCES.md](docs/04-DATA-SOURCES.md) | Grid datasets + mapping APIs, catalogued (through mid-2024) |
+| [docs/05-QUANTUM-UPDATES.md](docs/05-QUANTUM-UPDATES.md) | Quantum-for-grid research since mid-2024 — papers, hardware, honest advantage-claim scorecard |
+| [docs/06-ML-SOTA.md](docs/06-ML-SOTA.md) | Classical ML/GNN SOTA for power flow — the bar quantum has to beat |
+| [docs/07-TOOLING-UPDATES.md](docs/07-TOOLING-UPDATES.md) | Data/tooling updates since mid-2024 — HIFLD Open is dead, read this |
+| [docs/08-TOOLING-INTEGRATION.md](docs/08-TOOLING-INTEGRATION.md) | 07's survey turned into code — one Python hook per tool, adopt/reject decisions, verification |
+| [docs/versions/V0_SUMMARY.md](docs/versions/V0_SUMMARY.md) | Ground-truth repo state, file by file, priority-ordered punch list |
+| [CLAUDE.md](CLAUDE.md) / [AGENTS.md](AGENTS.md) | Agent entry point — read before any AI-assisted work here |
+
+## Origin
+
+Started as a Womanium Quantum+AI 2024 hackathon project — original submission archived at [womanium_README.md](womanium_README.md). The program's over, the judging rubric doesn't matter anymore, and neither does the deadline. What's left is the actual research question, now with no clock on it.
 
 ---
 
-*Related: [[physics/README]] · [[physics/CLAUDE]] · [[cs/CLAUDE]] · [[papers/HHL_algo_2009]] · [[physics/womanium/QUANTUM-GRID-OPTIMIZATION/QPGrid/README]] · [[physics/Q-SITE-Classiq-Open-Challenge-Quantum-Trees/README]]*
+*Related: [[CLAUDE]] · [[docs/00-VISION]] · [[docs/versions/V0_SUMMARY]] · [[physics/README]]*

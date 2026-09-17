@@ -2,7 +2,7 @@ import sys,os
 import pandas as pd
 import pandapower as pp
 import pandapower.auxiliary as aux  # for pandapowerNet typing
-import pandapower.plotting as ppplot
+import pandapower.plotting.plotly as ppl
 pd.options.display.max_rows = 20
 from glob import glob
 from collections import defaultdict
@@ -392,13 +392,12 @@ if __name__ == '__main__':
         pp.to_sqlite(net, save_dir+path.split('/')[-1]+'.db')
     
     if plot:
-        # for mapbox plotting with plotly -- set MAPBOX_TOKEN in the
-        # environment; a token was previously hardcoded here and
-        # committed to a public repo, treat it as compromised
-        fullAccess = os.environ.get('MAPBOX_TOKEN', '')
-        if fullAccess:
-            ppplot.set_mapbox_token(fullAccess)
-        ppplot.simple_plot(net, plot_gens=True, plot_loads=True)
-        # doesn't work :( why????
-        ppplot.simple_plotly(net, on_map=True, use_line_geodata=False, figsize=1)
+        # Plotly for all plotting (see repo CLAUDE.md). on_map=True needs MAPBOX_TOKEN in the
+        # environment (a token was previously hardcoded here + committed to a public repo --
+        # compromised); on_map=False works with no token.
+        token = os.environ.get('MAPBOX_TOKEN', '')
+        if token:
+            ppl.set_mapbox_token(token)
+        ppl.simple_plotly(net, on_map=bool(token), use_line_geodata=False, figsize=1,
+                          auto_open=True).show()
         # , on_map=True, use_line_geodata=False, filename='temp-plot.html')

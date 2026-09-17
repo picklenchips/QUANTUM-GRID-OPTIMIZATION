@@ -11,17 +11,8 @@ Defines useful utility functions and constants for quantum physics related thing
 """
 
 import numpy as np
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-
-# color mapping and bars, for PyLance type checking
-import matplotlib.colors as mcolors
-import matplotlib.cm as mplcm
-import matplotlib.colorbar as mplcb
-
-# bloch sphere / 3d plotting
-from matplotlib import animation
-from mpl_toolkits.mplot3d import axes3d
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # Range-Kutta approximation for ODEs
 from scipy.integrate import solve_ivp
@@ -35,73 +26,142 @@ from util import uFormat, timeIt, PLOTDIR, SAVEEXT
 
 
 # plot all edges of wireframe cube
-def plot_wf_cube(ax, corner1, corner2, color="orange", linestyle="dashed", linewidth=1):
+def plot_wf_cube(fig, corner1, corner2, color="orange", linestyle="dashed", linewidth=1):
     x1, y1, z1 = corner1
     x2, y2, z2 = corner2
-    ax.plot(
-        [x1, x2, x2, x2, x2, x1, x1, x1, x1, x1, x1, x2, x2, x2, x2, x1],
-        [y1, y1, y1, y2, y2, y2, y2, y1, y1, y2, y2, y2, y2, y1, y1, y1],
-        [z1, z1, z2, z2, z1, z1, z2, z2, z1, z1, z2, z2, z1, z1, z2, z2],
-        color=color,
-        linestyle=linestyle,
-        linewidth=1,
-    )
+    x_pts = [x1, x2, x2, x2, x2, x1, x1, x1, x1, x1, x1, x2, x2, x2, x2, x1]
+    y_pts = [y1, y1, y1, y2, y2, y2, y2, y1, y1, y2, y2, y2, y2, y1, y1, y1]
+    z_pts = [z1, z1, z2, z2, z1, z1, z2, z2, z1, z1, z2, z2, z1, z1, z2, z2]
+    dash = "dash" if linestyle == "dashed" else "solid"
+    fig.add_trace(go.Scatter3d(
+        x=x_pts, y=y_pts, z=z_pts,
+        mode="lines",
+        line=dict(color=color, width=linewidth, dash=dash),
+        showlegend=False,
+        hoverinfo="skip"
+    ))
 
 
-def plot_bloch_sphere(ax, frame_number=False, init_angle=False, angle_step=0):
-    """Plot bloch sphere and axes. adds frame_number in top left corner if specified"""
+def plot_bloch_sphere(fig, frame_number=False, init_angle=False, angle_step=0):
+    """Plot bloch sphere and axes to Plotly figure. adds frame_number in top left corner if specified"""
     default_angle = 24
     if isinstance(init_angle, bool):
         init_angle = default_angle
     # format axis
     if frame_number and angle_step:
         init_angle += frame_number * angle_step
-    ax.view_init(elev=20.0, azim=init_angle)  #  camera position
-    ax.set_axis_off()  # turn off axis lines
-    ax.set(
-        xticks=[],
-        yticks=[],
-        zticks=[],
-        xlabel="x",
-        ylabel="y",
-        zlabel="z",
-        zlim=(-1, 1),
-        proj_type="ortho",
-        box_aspect=[1, 1, 1],
-    )
-    ax.grid(False)
+
     # plot wireframe sphere
     sphere_res = 40j
     u, v = np.mgrid[0 : 2 * np.pi : sphere_res, 0 : np.pi : sphere_res]
     x = np.cos(u) * np.sin(v)
     y = np.sin(u) * np.sin(v)
     z = np.cos(v)
-    ax.plot_surface(x, y, z, color="blue", alpha=0.1, edgecolor="k", linewidth=0.1)
-    # plot axis lines
-    ax.plot([1, -1], [0, 0], [0, 0], color="black", linestyle="dashed", linewidth=0.5)
-    ax.plot([0, 0], [1, -1], [0, 0], color="black", linestyle="dashed", linewidth=0.5)
-    ax.plot([0, 0], [0, 0], [1, -1], color="black", linestyle="dashed", linewidth=0.5)
+    fig.add_trace(go.Surface(
+        x=x, y=y, z=z,
+        colorscale="Blues",
+        opacity=0.1,
+        showscale=False,
+        hoverinfo="skip"
+    ))
+
+    # plot axis lines (x, y, z)
+    fig.add_trace(go.Scatter3d(
+        x=[1, -1], y=[0, 0], z=[0, 0],
+        mode="lines",
+        line=dict(color="black", width=2, dash="dash"),
+        showlegend=False,
+        hoverinfo="skip"
+    ))
+    fig.add_trace(go.Scatter3d(
+        x=[0, 0], y=[1, -1], z=[0, 0],
+        mode="lines",
+        line=dict(color="black", width=2, dash="dash"),
+        showlegend=False,
+        hoverinfo="skip"
+    ))
+    fig.add_trace(go.Scatter3d(
+        x=[0, 0], y=[0, 0], z=[1, -1],
+        mode="lines",
+        line=dict(color="black", width=2, dash="dash"),
+        showlegend=False,
+        hoverinfo="skip"
+    ))
+
     # plot axis circles
     th = np.arange(0, 2 * np.pi + np.pi / 20, np.pi / 20)
-    x, y, z = np.cos(th), np.sin(th), np.zeros_like(th)
-    ax.plot(x, y, z, color="black", linestyle="dashed", linewidth=0.5)
-    ax.plot(z, x, y, color="black", linestyle="dashed", linewidth=0.5)
-    ax.plot(y, z, x, color="black", linestyle="dashed", linewidth=0.5)
+    x_circle = np.cos(th)
+    y_circle = np.sin(th)
+    z_circle = np.zeros_like(th)
+
+    fig.add_trace(go.Scatter3d(
+        x=x_circle, y=y_circle, z=z_circle,
+        mode="lines",
+        line=dict(color="black", width=1, dash="dash"),
+        showlegend=False,
+        hoverinfo="skip"
+    ))
+    fig.add_trace(go.Scatter3d(
+        x=z_circle, y=x_circle, z=y_circle,
+        mode="lines",
+        line=dict(color="black", width=1, dash="dash"),
+        showlegend=False,
+        hoverinfo="skip"
+    ))
+    fig.add_trace(go.Scatter3d(
+        x=y_circle, y=z_circle, z=x_circle,
+        mode="lines",
+        line=dict(color="black", width=1, dash="dash"),
+        showlegend=False,
+        hoverinfo="skip"
+    ))
+
     # add axis labels
-    ax.text(0, 0, -1, r"$|1\rangle$")
-    ax.text(0, 0, 1, r"$|0\rangle$")
-    ax.text(1, 0, 0, r"$|+\rangle$")
-    ax.text(-1, 0, 0, r"$|-\rangle$")
-    ax.text(0, 1, 0, r"$|y\rangle$")
-    ax.text(0, -1, 0, r"$|-y\rangle$")
+    labels_pos = [
+        (0, 0, -1, "$|1\\rangle$"),
+        (0, 0, 1, "$|0\\rangle$"),
+        (1, 0, 0, "$|+\\rangle$"),
+        (-1, 0, 0, "$|-\\rangle$"),
+        (0, 1, 0, "$|y\\rangle$"),
+        (0, -1, 0, "$|-y\\rangle$"),
+    ]
+    for px, py, pz, lbl in labels_pos:
+        fig.add_trace(go.Scatter3d(
+            x=[px], y=[py], z=[pz],
+            mode="text",
+            text=[lbl],
+            textposition="top center",
+            showlegend=False,
+            hoverinfo="skip"
+        ))
+
     # label frame number in the top left of the plot
     if isinstance(frame_number, int):
         angle = np.pi * init_angle / 180 - 3 * np.pi / 15 - np.pi / 2
-        ax.text(np.cos(angle), np.sin(angle), 0.8, f"frame: {frame_number}")
+        frame_x = np.cos(angle)
+        frame_y = np.sin(angle)
+        fig.add_trace(go.Scatter3d(
+            x=[frame_x], y=[frame_y], z=[0.8],
+            mode="text",
+            text=[f"frame: {frame_number}"],
+            textposition="top center",
+            showlegend=False,
+            hoverinfo="skip"
+        ))
+
+    # set camera angle
+    camera = dict(
+        eye=dict(
+            x=1.5*np.cos(np.pi*init_angle/180),
+            y=1.5*np.sin(np.pi*init_angle/180),
+            z=0.5
+        )
+    )
+    fig.update_layout(scene_camera=camera)
 
 
-def plot_bloch_vector(ax, vec, color="red", add_purity=True, scale_vector=False):
-    """plot the 3-vector vec on 3d axis ax with color color
+def plot_bloch_vector(fig, vec, color="red", add_purity=True, scale_vector=False):
+    """plot the 3-vector vec on Plotly figure with color color
     if add_purity, shows purity of state at top-left corner of plot
     if scale_vector, will scale vector magnitude with purity of state"""
     x, y, z = vec
@@ -116,18 +176,57 @@ def plot_bloch_vector(ax, vec, color="red", add_purity=True, scale_vector=False)
         zn = 0
 
     if scale_vector:
-        ax.plot([x, xn], [y, yn], [z, zn], color="black", linewidth=0.5)
-    # normalized vector
-    ax.scatter(xn, yn, zn, color=color, marker="o")  # ,markersize=1)
+        fig.add_trace(go.Scatter3d(
+            x=[x, xn], y=[y, yn], z=[z, zn],
+            mode="lines",
+            line=dict(color="black", width=1),
+            showlegend=False,
+            hoverinfo="skip"
+        ))
+
+    # normalized vector endpoint
+    fig.add_trace(go.Scatter3d(
+        x=[xn], y=[yn], z=[zn],
+        mode="markers",
+        marker=dict(color=color, size=5),
+        showlegend=False,
+        hoverinfo="skip"
+    ))
+
+    # arrow from origin to vector
     if scale_vector:  # plot "actual" vector
-        ax.quiver(0, 0, 0, x, y, z, color=color, linewidth=2, arrow_length_ratio=0.1)
+        vec_len = np.sqrt(x**2 + y**2 + z**2)
+        if vec_len > 0:
+            fig.add_trace(go.Scatter3d(
+                x=[0, x], y=[0, y], z=[0, z],
+                mode="lines+markers",
+                line=dict(color=color, width=4),
+                marker=dict(size=[0, 8]),
+                showlegend=False,
+                hoverinfo="skip"
+            ))
     else:  # plot the unit-normalized vector, which is easier to see
-        ax.quiver(0, 0, 0, xn, yn, zn, color=color, linewidth=2, arrow_length_ratio=0.1)
-    # plot cube as lighter color by dividing alpha by 2
-    lighter_color = mcolors.to_rgba(color)[:3] + (mcolors.to_rgba(color)[3] / 2,)
-    plot_wf_cube(ax, (0, 0, 0), (xn, yn, zn), color=lighter_color)
+        fig.add_trace(go.Scatter3d(
+            x=[0, xn], y=[0, yn], z=[0, zn],
+            mode="lines+markers",
+            line=dict(color=color, width=4),
+            marker=dict(size=[0, 8]),
+            showlegend=False,
+            hoverinfo="skip"
+        ))
+
+    # plot cube as lighter color
+    plot_wf_cube(fig, (0, 0, 0), (xn, yn, zn), color=color)
+
     if add_purity:
-        ax.text(0, 0.8, 1, f"purity: {uFormat(purity,0)}")
+        fig.add_trace(go.Scatter3d(
+            x=[0], y=[0.8], z=[1],
+            mode="text",
+            text=[f"purity: {uFormat(purity,0)}"],
+            textposition="top center",
+            showlegend=False,
+            hoverinfo="skip"
+        ))
 
 
 def animate_bloch(
@@ -140,34 +239,67 @@ def animate_bloch(
     add_purity=True,
     angle_step=0,
 ):
-    """Animates bloch sphere and saves to {SAVEDIR}{name}.mp4
+    """Animates bloch sphere and saves to {PLOTDIR}{name}.html
     states[time] = (x,y,z).  state vector at each time step
     rot_vecs[time] = (x,y,z) Hamiltonian vector at each time step
     fps: frames per second to save animation at
-    dpi: dots per inch for resolution of animation
+    dpi: dots per inch for resolution of animation (ignored for Plotly HTML)
     add_purity: if True, labels the purity of each frame"""
     nframes = states.shape[0]
-    fig = plt.figure(figsize=(12, 12))
-    fig.tight_layout()
-    ax = fig.add_subplot(projection="3d")
 
-    def vector_from_data(frame: int) -> None:
-        ax.clear()  # remove previous arrows
-        plot_bloch_sphere(ax, frame, angle_step=angle_step)
-        plot_bloch_vector(ax, states[frame], add_purity=add_purity)
+    # Create figure for each frame
+    frames_list = []
+    for frame_idx in range(nframes):
+        fig_frame = go.Figure()
+
+        # Plot sphere
+        init_angle = 24 + frame_idx * angle_step if angle_step else 24
+        plot_bloch_sphere(fig_frame, frame_number=frame_idx, init_angle=init_angle, angle_step=0)
+        plot_bloch_vector(fig_frame, states[frame_idx], add_purity=add_purity)
+
         if len(rot_vecs):  # add arrow symbolizing rotation axis
             if len(rot_vecs.shape) > 1:
-                plot_bloch_vector(ax, rot_vecs[frame], color="green", add_purity=False)
+                plot_bloch_vector(fig_frame, rot_vecs[frame_idx], color="green", add_purity=False)
             else:  # single rotation specified
-                plot_bloch_vector(ax, rot_vecs, color="green", add_purity=False)
+                plot_bloch_vector(fig_frame, rot_vecs, color="green", add_purity=False)
+
+        # Extract frame data
+        frames_list.append(go.Frame(data=fig_frame.data, name=str(frame_idx)))
+
         if not isinstance(pbar, bool):
             pbar.update(1)
 
-    ani = animation.FuncAnimation(fig=fig, func=vector_from_data, frames=nframes)
-    plot_name = PLOTDIR + name + ".mp4"
-    ani.save(plot_name, writer="ffmpeg", fps=fps, dpi=dpi)
+    # Create main figure with first frame
+    fig = frames_list[0].data
+    final_fig = go.Figure(data=fig, frames=frames_list)
+
+    # Add animation settings
+    final_fig.update_layout(
+        updatemenus=[{
+            'type': 'buttons',
+            'showactive': False,
+            'buttons': [
+                {'label': 'Play', 'method': 'animate',
+                 'args': [None, {'frame': {'duration': 1000/fps, 'redraw': True},
+                                'fromcurrent': True}]},
+                {'label': 'Pause', 'method': 'animate',
+                 'args': [[None], {'frame': {'duration': 0, 'redraw': False},
+                                  'mode': 'immediate'}]}
+            ]
+        }],
+        width=800, height=800,
+        scene=dict(
+            xaxis=dict(range=[-1.2, 1.2]),
+            yaxis=dict(range=[-1.2, 1.2]),
+            zaxis=dict(range=[-1.2, 1.2]),
+            aspectmode='cube'
+        )
+    )
+
+    plot_name = PLOTDIR + "/" + name + ".html"
+    final_fig.write_html(plot_name)
     print("saved animation to", plot_name)
-    return ani
+    return final_fig
 
 
 def label_str_states(N):
@@ -190,15 +322,15 @@ def plot_op(
     operators: list | tuple | np.ndarray,
     titles=[],
     saveplot=False,
-    cmap_name="turbo",
+    cmap_name="RdBu",
     box_spec=False,
 ):
-    """Plot 2-dimensional operators
+    """Plot 2-dimensional operators using Plotly
     Inputs:
     - operators: takes in ndarray or list/tuple of ndarrays
     - titles: title or list of titles for multiple ops
     - saveplot: True or string to name file of plot
-    - cmap_name: name of mpl.colormap to use
+    - cmap_name: name of Plotly colorscale to use (default "RdBu" for diverging)
     - box_spec: if True, will show numbers of matrix elements
     """
     if not isinstance(operators, list) and not isinstance(operators, tuple):
@@ -206,11 +338,7 @@ def plot_op(
     if not isinstance(titles, list) and not isinstance(operators, tuple):
         titles = [titles]
     nops = len(operators)
-    fig = plt.figure(figsize=(8, 4 * nops))
-    gs = fig.add_gridspec(nops, 3, width_ratios=[20, 20, 1])
-    plt.subplots_adjust(
-        left=0.1, bottom=0.1, right=0.9, top=0.9, wspace=0.1, hspace=0.1
-    )
+
     # get abs max of all operators
     absmax = 0
     for op in operators:
@@ -218,42 +346,93 @@ def plot_op(
         themax = max(op.real.max(), op.imag.max())
         amax = max(abs(themin), abs(themax))
         absmax = max(absmax, amax)
-    # make colorbar
-    cax = fig.add_subplot(gs[:, 2])
-    norm = mcolors.Normalize(vmin=-absmax, vmax=absmax)
-    cm_map = mplcm.ScalarMappable(norm=norm, cmap=cmap_name)
-    cb = mplcb.ColorbarBase(cax, cmap=cmap_name, norm=norm, orientation="vertical")
+
+    # Create subplot titles
+    subplot_titles = []
+    for i in range(nops):
+        title = titles[i] if len(titles) > i else "_DEF_"
+        subplot_titles.append(f"Re{{ {title} }}")
+        subplot_titles.append(f"Im{{ {title} }}")
+
+    # Create subplots: nops rows, 2 cols (real and imag)
+    fig = make_subplots(
+        rows=nops, cols=2,
+        subplot_titles=subplot_titles,
+        specs=[[{"type": "heatmap"}, {"type": "heatmap"}]] * nops,
+        horizontal_spacing=0.15,
+        vertical_spacing=0.1
+    )
+
     # plot operators
     for i in range(nops):
         operator = operators[i]
-        ax1 = fig.add_subplot(gs[i, 0])
-        ax2 = fig.add_subplot(gs[i, 1])
-        ax1.matshow(operator.real, cmap=cmap_name, vmin=-absmax, vmax=absmax)
-        ax2.matshow(operator.imag, cmap=cmap_name, vmin=-absmax, vmax=absmax)
-        title = titles[i] if len(titles) > i else "_DEF_"
-        ax1.set(xticks=[], yticks=[])
-        ax1.set_title("Re{ " + title + " }")
-        ax2.set(xticks=[], yticks=[])
-        ax2.set_title("Im{ " + title + " }")
+
+        # Real part heatmap
+        fig.add_trace(
+            go.Heatmap(
+                z=operator.real,
+                colorscale=cmap_name,
+                zmid=0,
+                zmin=-absmax,
+                zmax=absmax,
+                showscale=(i == 0),  # only first subplot shows colorbar
+                colorbar=dict(x=1.02) if i == 0 else None,
+                hovertemplate="Value: %{z:.3f}<extra></extra>",
+                name="Real"
+            ),
+            row=i+1, col=1
+        )
+
+        # Imaginary part heatmap
+        fig.add_trace(
+            go.Heatmap(
+                z=operator.imag,
+                colorscale=cmap_name,
+                zmid=0,
+                zmin=-absmax,
+                zmax=absmax,
+                showscale=False,
+                hovertemplate="Value: %{z:.3f}<extra></extra>",
+                name="Imag"
+            ),
+            row=i+1, col=2
+        )
+
+        # Add text annotations if box_spec is True
         if box_spec:
-            for (i, j), val in np.ndenumerate(operator.real):
-                ax1.text(
-                    j,
-                    i,
-                    uFormat(val, 0),
-                    ha="center",
-                    va="center",
-                    color=("black" if abs(val) < absmax / 2 else "white"),
+            for (row_idx, col_idx), val in np.ndenumerate(operator.real):
+                fig.add_annotation(
+                    text=uFormat(val, 0),
+                    x=col_idx, y=row_idx,
+                    xref=f"x{i*2+1}", yref=f"y{i*2+1}",
+                    showarrow=False,
+                    font=dict(
+                        color="black" if abs(val) < absmax / 2 else "white",
+                        size=8
+                    )
                 )
-            for (i, j), val in np.ndenumerate(operator.imag):
-                ax2.text(
-                    j,
-                    i,
-                    uFormat(val, 0),
-                    ha="center",
-                    va="center",
-                    color=("black" if abs(val) < absmax / 2 else "white"),
+            for (row_idx, col_idx), val in np.ndenumerate(operator.imag):
+                fig.add_annotation(
+                    text=uFormat(val, 0),
+                    x=col_idx, y=row_idx,
+                    xref=f"x{i*2+2}", yref=f"y{i*2+2}",
+                    showarrow=False,
+                    font=dict(
+                        color="black" if abs(val) < absmax / 2 else "white",
+                        size=8
+                    )
                 )
+
+    # Update layout
+    fig.update_xaxes(showticklabels=False)
+    fig.update_yaxes(showticklabels=False)
+    fig.update_layout(
+        height=400 * nops,
+        width=900,
+        showlegend=False,
+        hovermode="closest"
+    )
+
     if saveplot:
         if isinstance(saveplot, str):
             plt_name = (
@@ -271,15 +450,15 @@ def plot_op(
                 + "_2d"
                 + SAVEEXT
             )
-        plt.savefig(plt_name, bbox_inches="tight")
+        fig.write_image(plt_name)
         print(f"saved figure {plt_name}")
-    plt.show()
+    fig.show()
 
 
 def plot_theory_exp(
-    op_th, op_exp, title, saveplot=False, cmap_name="turbo", labels=None
+    op_th, op_exp, title, saveplot=False, cmap_name="Turbo", labels=None
 ):
-    """3-d comparison of theoretical vs. experimental operators"""
+    """3-d comparison of theoretical vs. experimental operators using Plotly"""
     zmax = max(op_th.real.max(), op_th.imag.max())
     zmin = min(op_th.real.min(), op_th.imag.min())
     cmax = max(
@@ -287,7 +466,6 @@ def plot_theory_exp(
         abs(min(op_exp.real.min(), op_exp.imag.min())),
     )
     cmax = max(cmax, max(abs(zmax), abs(zmin)))
-    cmap = mpl.colormaps[cmap_name]
     _labels = labels if labels else label_str_states(int(np.log2(op_th.shape[0])))
     xrange = range(op_th.shape[0])
     X, Y = np.meshgrid(xrange, xrange)
@@ -295,40 +473,101 @@ def plot_theory_exp(
     Y = Y.flatten()
     Z = np.zeros_like(X)
     dx = 0.5 * np.ones_like(X)
-    op_th = op_th.flatten()
-    op_exp = op_exp.flatten()
+    op_th_flat = op_th.flatten()
+    op_exp_flat = op_exp.flatten()
     dy = dx.copy()
-    fig, axs = plt.subplots(
-        1, 2, figsize=(12, 6), subplot_kw={"projection": "3d", "proj_type": "ortho"}
+
+    # Create subplots for Real and Imaginary parts
+    fig = make_subplots(
+        rows=1, cols=2,
+        specs=[[{"type": "scatter3d"}, {"type": "scatter3d"}]],
+        subplot_titles=(f"Re{{ {title} }}", f"Im{{ {title} }}")
     )
-    ax1, ax2 = axs
-    ax1.set_title("Re{ " + title + " }")
-    nreal = op_exp.real / (2 * cmax) + 0.5
-    colors = [cmap(x) for x in nreal]
-    ax1.bar3d(X, Y, Z, dx, dy, op_exp.real, alpha=0.9, color=colors)
-    ax1.bar3d(X, Y, Z, dx, dy, op_th.real, edgecolor="black", alpha=0)
-    ax2.set_title("Im{ " + title + " }")
-    nimag = op_exp.imag / (2 * cmax) + 0.5
-    colors = [cmap(x) for x in nimag]
-    ax2.bar3d(X, Y, Z, dx, dy, op_exp.imag, alpha=0.9, color=colors)
-    ax2.bar3d(X, Y, Z, dx, dy, op_th.imag, edgecolor="black", alpha=0)
-    fig.tight_layout()
-    for ax in axs:
-        ax.view_init(elev=50.0, azim=30)  #  camera position
-        # ax.set_axis_off()  # turn off axis lines
-        ax.set_xticks(xrange, labels=_labels)
-        ax.set_yticks(xrange, labels=_labels)
-        if labels:
-            ax.set(zlabel=r"$\hat{\rho}$", zlim=(zmin, zmax), proj_type="ortho")
-        else:
-            ax.set(
-                xlabel="Input",
-                ylabel="Output",
-                zlabel=r"$\hat{\rho}$",
-                zlim=(zmin, zmax),
-                proj_type="ortho",
+
+    # Real part - experimental (main bars)
+    nreal = op_exp_flat.real / (2 * cmax) + 0.5
+    colors_real = [cmap_name] * len(nreal)  # Plotly will handle colorscale
+    fig.add_trace(
+        go.Scatter3d(
+            x=X, y=Y, z=op_exp_flat.real,
+            mode="markers",
+            marker=dict(
+                size=6,
+                color=op_exp_flat.real,
+                colorscale=cmap_name,
+                showscale=True,
+                cmin=zmin,
+                cmax=zmax,
+                colorbar=dict(x=0.46, len=0.4)
+            ),
+            name="Experimental (Real)"
+        ),
+        row=1, col=1
+    )
+
+    # Real part - theoretical (outline)
+    fig.add_trace(
+        go.Scatter3d(
+            x=X, y=Y, z=op_th_flat.real,
+            mode="markers",
+            marker=dict(size=6, color="black", symbol="diamond"),
+            name="Theoretical (Real)",
+            opacity=0.5
+        ),
+        row=1, col=1
+    )
+
+    # Imaginary part - experimental (main bars)
+    nimag = op_exp_flat.imag / (2 * cmax) + 0.5
+    fig.add_trace(
+        go.Scatter3d(
+            x=X, y=Y, z=op_exp_flat.imag,
+            mode="markers",
+            marker=dict(
+                size=6,
+                color=op_exp_flat.imag,
+                colorscale=cmap_name,
+                showscale=True,
+                cmin=zmin,
+                cmax=zmax,
+                colorbar=dict(x=1.02, len=0.4)
+            ),
+            name="Experimental (Imag)"
+        ),
+        row=1, col=2
+    )
+
+    # Imaginary part - theoretical (outline)
+    fig.add_trace(
+        go.Scatter3d(
+            x=X, y=Y, z=op_th_flat.imag,
+            mode="markers",
+            marker=dict(size=6, color="black", symbol="diamond"),
+            name="Theoretical (Imag)",
+            opacity=0.5
+        ),
+        row=1, col=2
+    )
+
+    # Update axes for both subplots
+    for col_num in [1, 2]:
+        col_str = "" if col_num == 1 else "2"
+        fig.update_layout({
+            f"scene{col_str}": dict(
+                xaxis=dict(tickvals=list(xrange), ticktext=_labels, title="Input"),
+                yaxis=dict(tickvals=list(xrange), ticktext=_labels, title="Output"),
+                zaxis=dict(title=r"$\hat{\rho}$", range=[zmin, zmax]),
+                camera=dict(eye=dict(x=1.5, y=1.5, z=1.3))
             )
-        # ax.grid(False)
+        })
+
+    fig.update_layout(
+        height=600,
+        width=1200,
+        showlegend=True,
+        hovermode="closest"
+    )
+
     if saveplot:
         if isinstance(saveplot, str):
             plt_name = (
@@ -346,9 +585,9 @@ def plot_theory_exp(
                 + "_3d"
                 + SAVEEXT
             )
-        plt.savefig(plt_name, bbox_inches="tight")
+        fig.write_image(plt_name)
         print(f"saved figure {plt_name}")
-    plt.show()
+    fig.show()
 
 
 # --- OPERATOR FUNCTIONS --- #

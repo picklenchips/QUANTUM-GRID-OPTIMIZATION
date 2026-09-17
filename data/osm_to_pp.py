@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 import queue
 import math
 import re
+import json
 from collections import defaultdict
 import pandapower as pp
 import pandapower.auxiliary as aux
@@ -379,12 +380,27 @@ def network_from_OSM(OSM_DATA) -> aux.pandapowerNet:
             for (n1, b1), (n2, b2) in zip(touches, touches[1:]):
                 if b1 == b2:
                     continue
-                geo1 = net['bus_geodata'].loc[b1]
-                geo2 = net['bus_geodata'].loc[b2]
-                length_km = max(_haversine_km(geo1['x'], geo1['y'], geo2['x'], geo2['y']), 0.001)
+                (lat1, lon1), (lat2, lon2) = _bus_latlon(net, b1), _bus_latlon(net, b2)
+                length_km = max(_haversine_km(lat1, lon1, lat2, lon2), 0.001)
                 pp.create_line(net, from_bus=b1, to_bus=b2, length_km=length_km,
                                 std_type="NAYY 4x150 SE", name=name, vn_kv=vn_kv)
     return net
+
+
+def _bus_latlon(net: aux.pandapowerNet, bus_idx: int) -> tuple[float, float]:
+    """ (lat, lon) of a bus. pandapower >=3.0 removed the bus_geodata table -- geodata is now a
+    GeoJSON-Point string in net.bus['geo']; this repo's converters pass create_bus(geodata=(lat, lon))
+    so the stored coordinates are [lat, lon]. """
+    geo = net.bus.at[bus_idx, 'geo'] if 'geo' in net.bus.columns else None
+    if isinstance(geo, str) and geo:
+        try:
+            c = json.loads(geo)['coordinates']
+            return float(c[0]), float(c[1])
+        except (ValueError, KeyError, IndexError):
+            pass
+    elif isinstance(geo, (list, tuple)) and len(geo) == 2:
+        return float(geo[0]), float(geo[1])
+    return 0.0, 0.0
 
 if __name__ == '__main__':
     #bounding box coords around Ft. Lauderdale, FL, power plant

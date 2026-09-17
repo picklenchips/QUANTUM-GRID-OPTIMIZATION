@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>QPGrid — tooling integration</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- MapLibre GL JS: renders OpenInfraMap's vector (pbf) tiles natively, no Mapbox token needed -->
+<link href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<style>
+  :root{
+    --bg:#f7f7f9; --panel:#ffffff; --ink:#1a1a1f; --muted:#6b6b76; --line:#e3e3e8;
+    --ok:#1f9d55; --warn:#c47f17; --dead:#b23b3b; --accent:#d12064;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#14141a; --panel:#1e1e26; --ink:#ececf0; --muted:#9a9aa6; --line:#2c2c36;
+           --ok:#43c47a; --warn:#e0a53a; --dead:#e06a6a; --accent:#e84f8f; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+       background:var(--bg);color:var(--ink)}
+  header{padding:22px 26px 10px}
+  h1{margin:0;font-size:20px;letter-spacing:-.01em}
+  header p{margin:4px 0 0;color:var(--muted);max-width:70ch}
+  .wrap{display:grid;grid-template-columns:minmax(420px,540px) 1fr;gap:18px;padding:14px 26px 28px}
+  @media (max-width:960px){.wrap{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .panel h2{margin:0;padding:12px 16px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;
+            color:var(--muted);border-bottom:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td,th{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+  td:nth-child(3){font-size:12px}
+  th{font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  tr:last-child td{border-bottom:none}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px}
+  .s-ok .dot{background:var(--ok)} .s-warn .dot{background:var(--warn)} .s-dead .dot{background:var(--dead)}
+  .s-ok{color:var(--ok)} .s-warn{color:var(--warn)} .s-dead{color:var(--dead)}
+  code{font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:rgba(128,128,128,.13);
+       padding:1px 5px;border-radius:4px}
+  .mappanel{position:relative;min-height:620px}
+  @media (max-width:900px){.mappanel{min-height:460px}}
+  #map{position:absolute;top:42px;left:0;right:0;bottom:0}
+  .maplibregl-map{font:inherit}
+  .legend{position:absolute;bottom:12px;left:12px;z-index:2;background:var(--panel);border:1px solid var(--line);
+          border-radius:8px;padding:8px 10px;font-size:12px;color:var(--ink);opacity:.95}
+  .legend b{display:block;margin-bottom:4px;font-size:10px;text-transform:uppercase;color:var(--muted)}
+  .sw{display:inline-block;width:20px;height:3px;vertical-align:middle;margin-right:6px}
+  .foot{padding:0 26px 26px;color:var(--muted);font-size:12px}
+  .meta{padding:10px 16px;color:var(--muted);font-size:12px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header>
+  <h1>QPGrid · external tooling integration</h1>
+  <p>One Python hook per tool from <code>docs/07-TOOLING-UPDATES.md</code>. Status is written by
+  <code>notebooks/tooling_integration.ipynb</code> (<code>web/data/tooling_status.json</code>); the map
+  overlays a converted network and a climate-hazard layer the same notebook exports. Base map:
+  OpenStreetMap raster + OpenInfraMap vector tiles — no Mapbox token.</p>
+</header>
+
+<div class="wrap">
+  <div class="panel">
+    <h2>Integration status</h2>
+    <table id="status"><thead><tr><th>Tool</th><th>Module</th><th>Status</th></tr></thead>
+      <tbody><tr><td colspan="3" style="color:var(--muted)">loading web/data/tooling_status.json…</td></tr></tbody>
+    </table>
+    <div class="meta" id="statusmeta"></div>
+  </div>
+
+  <div class="panel mappanel">
+    <h2>Converted network + climate overlay</h2>
+    <div id="map"></div>
+    <div class="legend">
+      <b>Legend</b>
+      <div><span class="sw" style="background:#22d3ee"></span>converted pandapower network</div>
+      <div><span class="dot" style="background:#ff9f1c;width:10px;height:10px"></span>Overpass hook output (OSM power)</div>
+      <div><span class="sw" style="background:#ff7a7a"></span>OpenInfraMap vector tiles</div>
+      <div><span class="sw" style="background:linear-gradient(90deg,#2c7fb8,#ffffb2,#bd0026)"></span>ClimRR fire-weather index</div>
+    </div>
+  </div>
+</div>
+
+<div class="foot" id="foot"></div>
+
+<script>
+const OIM_TILES = "https://openinframap.org/tiles/{z}/{x}/{y}.pbf";
+
+const STATUS_CLASS = {ok:"s-ok", pass:"s-ok", warn:"s-warn", partial:"s-warn", dead:"s-dead", skip:"s-warn"};
+
+async function loadJSON(url){ try{ const r = await fetch(url); if(!r.ok) throw 0; return await r.json(); }catch(e){ return null; } }
+
+async function initStatus(){
+  const data = await loadJSON("data/tooling_status.json");
+  const tb = document.querySelector("#status tbody");
+  if(!data){ tb.innerHTML = '<tr><td colspan="3" class="s-warn"><span class="dot"></span>run the notebook to generate web/data/tooling_status.json</td></tr>';
+             return; }
+  tb.innerHTML = "";
+  for(const row of data.rows){
+    const cls = STATUS_CLASS[(row.status||"").toLowerCase()] || "s-warn";
+    tb.insertAdjacentHTML("beforeend",
+      `<tr><td>${row.tool}</td><td><code>${row.module}</code></td>
+       <td class="${cls}"><span class="dot"></span>${row.status}${row.detail? " — "+row.detail : ""}</td></tr>`);
+  }
+  document.querySelector("#statusmeta").textContent =
+     `generated ${data.generated || "?"} · ${data.rows.filter(r=>/ok|pass/i.test(r.status)).length}/${data.rows.length} passing`;
+}
+
+async function initMap(){
+  const net = await loadJSON("data/demo_network.geojson");
+  const fwi = await loadJSON("data/climrr_fwi.geojson");
+  const oim = await loadJSON("data/openinframap_power.geojson");
+
+  let center = [-119.5, 37.3], zoom = 5.2, bounds = null;   // California fallback
+  const src = (net && net.features && net.features.length) ? net : oim;
+  if(src && src.features && src.features.length){
+    const pts = src.features.flatMap(f => f.geometry.type==="Point" ? [f.geometry.coordinates]
+                 : (f.geometry.type==="Polygon" ? f.geometry.coordinates[0] : f.geometry.coordinates));
+    const lon = pts.map(p=>p[0]).filter(Number.isFinite), lat = pts.map(p=>p[1]).filter(Number.isFinite);
+    bounds = [[Math.min(...lon),Math.min(...lat)],[Math.max(...lon),Math.max(...lat)]];
+    center = [(bounds[0][0]+bounds[1][0])/2, (bounds[0][1]+bounds[1][1])/2];
+  }
+
+  const fc = g => (g && g.type === "FeatureCollection") ? {type:"FeatureCollection", features:g.features}
+                                                        : {type:"FeatureCollection", features:[]};
+  const vf = (fwi && fwi._value_field) || "summer_Midc_Mean";
+  const foot = document.querySelector("#foot");
+
+  // every source is declared up-front in the style (adding geojson sources post-load can fail to
+  // paint under headless/software-GL); layers reference them directly.
+  const style = {
+    version:8,
+    sources:{
+      osm:{type:"raster", tiles:["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize:256,
+           attribution:"© OpenStreetMap contributors"},
+      oim:{type:"vector", tiles:[OIM_TILES], minzoom:2, maxzoom:17, attribution:"© OpenInfraMap"},
+      fwi:{type:"geojson", data:fc(fwi)},
+      oimgj:{type:"geojson", data:fc(oim)},
+      net:{type:"geojson", data:fc(net)}
+    },
+    layers:[
+      {id:"osm", type:"raster", source:"osm", paint:{"raster-opacity":0.42,"raster-saturation":-0.7}},
+      {id:"fwi-fill", type:"fill", source:"fwi",
+       paint:{"fill-color":["interpolate",["linear"],["coalesce",["to-number",["get",vf]],0],
+                8,"#2c7fb8", 16,"#7fcdbb", 24,"#ffffb2", 32,"#fd8d3c", 42,"#bd0026"],
+              "fill-opacity":0.5}},
+      {id:"fwi-out", type:"line", source:"fwi", paint:{"line-color":"#00000022","line-width":0.4}},
+      {id:"oim-line", type:"line", source:"oim", "source-layer":"power_line",
+       paint:{"line-color":"#ff7a7a","line-width":0.7,"line-opacity":0.55}},
+      {id:"oimgj-line", type:"line", source:"oimgj", filter:["==","$type","LineString"],
+       paint:{"line-color":"#ff9f1c","line-width":1.3}},
+      {id:"oimgj-pt", type:"circle", source:"oimgj", filter:["==","$type","Point"],
+       paint:{"circle-radius":3,"circle-color":"#ff9f1c","circle-opacity":0.85}},
+      {id:"net-line", type:"line", source:"net", filter:["==","kind","line"],
+       paint:{"line-color":"#22d3ee","line-width":1.8,"line-opacity":0.95}},
+      {id:"net-bus", type:"circle", source:"net", filter:["==","kind","bus"],
+       paint:{"circle-radius":4,"circle-color":"#22d3ee","circle-stroke-width":1,"circle-stroke-color":"#04222a"}}
+    ]
+  };
+
+  const map = new maplibregl.Map({container:"map", style, center, zoom, attributionControl:true});
+  map.addControl(new maplibregl.NavigationControl(), "top-right");
+  new ResizeObserver(() => map.resize()).observe(document.getElementById("map"));
+  map.on("error", e => console.warn("map:", e.error && e.error.message || e.type));
+
+  map.on("load", () => {
+    map.resize();
+    if(bounds) map.fitBounds(bounds, {padding:36, maxZoom:11, animate:false});
+    map.on("click", "net-bus", e => {
+      const p = e.features[0].properties;
+      new maplibregl.Popup().setLngLat(e.lngLat)
+        .setHTML(`<b>${p.name || ("bus " + p.id)}</b><br>${p.vn_kv} kV`).addTo(map);
+    });
+    const parts = [];
+    if(net && net.features.length) parts.push(`${net.features.length} converted-network features`);
+    if(oim && oim.features.length) parts.push(`${oim.features.length} Overpass-hook features`);
+    if(fwi && fwi.features.length) parts.push(`${fwi.features.length} ClimRR cells`);
+    foot.textContent = parts.join(" · ") ||
+      "no overlay data — run notebooks/tooling_integration.ipynb to write web/data/*.geojson";
+  });
+}
+
+initStatus();
+initMap();
+</script>
+</body>
+</html>

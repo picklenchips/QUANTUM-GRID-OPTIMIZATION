@@ -1,17 +1,29 @@
+"""
+TODO: write docstring
+
+
+This file does the following:
+ - exposes functions to convert a pandapower network into a graph representation
+ - exposes functions to compute the admittance and impedance matrices of a pandapower network
+ - exposes functions to compute the power transfer distribution factors (PTDF) of a pandapower network
+ - exposes functions to compute the minimum sensitivity matrix, electrical coupling strength matrix, modularity matrix, and self-reliance matrix of a pandapower network
+ - exposes functions to compute the microgrid objective function of a pandapower network
+ - to_QUBO()
+
+"""
+
 # the following is equivalent to the multivoltage example
-import sys,os
+import sys, os
 
 import pandas as pd
 import pandapower as pp
 import pandapower.auxiliary as aux  # for pandapowerNet typing
-import pandapower.plotting as ppplot
+import pandapower.plotting.plotly as ppl  # Plotly for all plotting (see repo CLAUDE.md)
 import pandapower.networks as ppnet
 import pandapower.topology as pptop
 import plotly.express as px
-import matplotlib.pyplot as plt
-import pandas as pd
-import pandapower as pp
 import pandapower.toolbox as pptools
+from pandapower.auxiliary import pandapowerNet
 
 import networkx as nx
 
@@ -25,73 +37,138 @@ from dimod import BinaryQuadraticModel as BQM
 from dimod import SimulatedAnnealingSampler
 from collections import defaultdict
 from typing import Iterable
-#from dwave.system import DWaveSampler, EmbeddingComposite
+
+# from dwave.system import DWaveSampler, EmbeddingComposite
 
 import queue
 
 # Mapbox tokens were previously hardcoded here and committed to a public
 # repo -- treat those as compromised, rotate them in the Mapbox dashboard.
 # Set MAPBOX_TOKEN in the environment before running anything that plots.
-fullAccess = os.environ.get('MAPBOX_TOKEN', '')
+fullAccess = os.environ.get("MAPBOX_TOKEN", "")
 if fullAccess:
-    ppplot.set_mapbox_token(fullAccess)
+    ppl.set_mapbox_token(fullAccess)
 
 # netv = pandapower.networks.example_multivoltage()
 nbusses = 3
-def create_minimal_example(nbusses=3):
+
+
+def create_minimal_example(nbusses=3) -> aux.pandapowerNet:
+    """
+    TODO: move to examples/ module
+
+    :param nbusses: Description
+    """
     net = pp.create_empty_network()
+    assert isinstance(net, aux.pandapowerNet)
     # power plant
-    planti = pp.create_bus(net, name = "110 kV plant", vn_kv = 110, type = 'b')
-    pp.create_gen(net, planti, p_mw = 100, vm_pu = 1.0, name = "diesel gen")
-    i = pp.create_bus(net, vn_kv = 110, type='n', name='lithium ion storage')
-    pp.create_storage(net, i, p_mw = 10, max_e_mwh = 20, q_mvar = 0.01, name = "battery")
-    pp.create_line(net, name = "plant to storage", from_bus = 0, to_bus = 1, length_km = 0.1, std_type = "NAYY 4x150 SE")
+    planti = pp.create_bus(net, name="110 kV plant", vn_kv=110, type="b")
+    pp.create_gen(net, planti, p_mw=100, vm_pu=1.0, name="diesel gen")
+    i = pp.create_bus(net, vn_kv=110, type="n", name="lithium ion storage")
+    pp.create_storage(net, i, p_mw=10, max_e_mwh=20, q_mvar=0.01, name="battery")
+    pp.create_line(
+        net,
+        name="plant to storage",
+        from_bus=0,
+        to_bus=1,
+        length_km=0.1,
+        std_type="NAYY 4x150 SE",
+    )
     # external grid
-    exti = pp.create_bus(net, name = "110 kV bar out", vn_kv = 110, type = 'b')
-    pp.create_ext_grid(net, exti, vm_pu = 1)
-    pp.create_line(net, name = "plant to out", from_bus = planti, to_bus = exti, length_km = 2, std_type = "NAYY 4x150 SE")
-    pp.create_switch(net, bus = planti, element = exti, et = 'b', closed = True)
+    exti = pp.create_bus(net, name="110 kV bar out", vn_kv=110, type="b")
+    pp.create_ext_grid(net, exti, vm_pu=1)
+    pp.create_line(
+        net,
+        name="plant to out",
+        from_bus=planti,
+        to_bus=exti,
+        length_km=2,
+        std_type="NAYY 4x150 SE",
+    )
+    pp.create_switch(net, bus=planti, element=exti, et="b", closed=True)
     # city
-    cityi = pp.create_bus(net, name = "110 kV city bar", vn_kv = 110, type = 'b')
-    pp.create_line(net, name = "plant to city", from_bus = planti, to_bus = cityi, length_km = 1.5, std_type = "NAYY 4x150 SE")
-    pp.create_switch(net, bus = planti, element = cityi, et = 'b', closed = True)
+    cityi = pp.create_bus(net, name="110 kV city bar", vn_kv=110, type="b")
+    pp.create_line(
+        net,
+        name="plant to city",
+        from_bus=planti,
+        to_bus=cityi,
+        length_km=1.5,
+        std_type="NAYY 4x150 SE",
+    )
+    pp.create_switch(net, bus=planti, element=cityi, et="b", closed=True)
     # neighborhood
-    neighbori = pp.create_bus(net, name = "20 kV bar", vn_kv = 20, type = 'b')
+    neighbori = pp.create_bus(net, name="20 kV bar", vn_kv=20, type="b")
     previ = neighbori
-    i = pp.create_transformer_from_parameters(net, hv_bus=cityi, lv_bus=neighbori, i0_percent=0.038, pfe_kw=11.6,
-                                        vkr_percent=0.322, sn_mva=40, vn_lv_kv=22.0, vn_hv_kv=110.0, 
-                                        vk_percent=17.8, name='city to n1 trafo')
-    pp.create_switch(net, bus = cityi, element = i, et = 't', closed = True)
+    i = pp.create_transformer_from_parameters(
+        net,
+        hv_bus=cityi,
+        lv_bus=neighbori,
+        i0_percent=0.038,
+        pfe_kw=11.6,
+        vkr_percent=0.322,
+        sn_mva=40,
+        vn_lv_kv=22.0,
+        vn_hv_kv=110.0,
+        vk_percent=17.8,
+        name="city to n1 trafo",
+    )
+    pp.create_switch(net, bus=cityi, element=i, et="t", closed=True)
     # add 2 sections
     for i in range(nbusses):
-        newi = pp.create_bus(net, name = f"bus {i+2}", vn_kv = 20, type = 'b')
-        pp.create_line(net, name = f"line {previ}-{newi}", from_bus = previ, to_bus = newi, length_km = 0.3, std_type = "NAYY 4x150 SE")
-        pp.create_load(net, newi, p_mw = 1, q_mvar = 0.2, name = f"load {newi}")
+        newi = pp.create_bus(net, name=f"bus {i+2}", vn_kv=20, type="b")
+        pp.create_line(
+            net,
+            name=f"line {previ}-{newi}",
+            from_bus=previ,
+            to_bus=newi,
+            length_km=0.3,
+            std_type="NAYY 4x150 SE",
+        )
+        pp.create_load(net, newi, p_mw=1, q_mvar=0.2, name=f"load {newi}")
         previ = newi
     sec1i = newi
     previ = neighbori
     for i in range(nbusses):
-        newi = pp.create_bus(net, name = f"bus {i+2+nbusses}", vn_kv = 20, type = 'b')
-        pp.create_line(net, name = f"line {previ}-{newi}", from_bus = previ, to_bus = newi, length_km = 0.3, std_type = "NAYY 4x150 SE")
-        pp.create_load(net, newi, p_mw = 1, q_mvar = 0.2, name = f"load {newi}")
+        newi = pp.create_bus(net, name=f"bus {i+2+nbusses}", vn_kv=20, type="b")
+        pp.create_line(
+            net,
+            name=f"line {previ}-{newi}",
+            from_bus=previ,
+            to_bus=newi,
+            length_km=0.3,
+            std_type="NAYY 4x150 SE",
+        )
+        pp.create_load(net, newi, p_mw=1, q_mvar=0.2, name=f"load {newi}")
         previ = newi
     # connect the 2 sections at the end
-    i = pp.create_line(net, name = f"line {previ}-{sec1i}", from_bus = previ, to_bus = sec1i, length_km = 0.2, std_type = "NAYY 4x150 SE")
-    pp.create_switch(net, bus = previ, element = i, et = 'l', closed = False)
+    i = pp.create_line(
+        net,
+        name=f"line {previ}-{sec1i}",
+        from_bus=previ,
+        to_bus=sec1i,
+        length_km=0.2,
+        std_type="NAYY 4x150 SE",
+    )
+    pp.create_switch(net, bus=previ, element=i, et="l", closed=False)
     return net
+
 
 def admittance_of_pd(df: pd.DataFrame) -> pd.Series:
     # should be faster to write a native pandas function
-    return df['r_ohm_per_km'] - 1j*df['x_ohm_per_km']/(df['length_km']*(df['r_ohm_per_km']**2 + df['x_ohm_per_km']**2))
+    return df["r_ohm_per_km"] - 1j * df["x_ohm_per_km"] / (
+        df["length_km"] * (df["r_ohm_per_km"] ** 2 + df["x_ohm_per_km"] ** 2)
+    )
 
-class NetGraph():
-    """ 
-    class to define a network-equivalent graph for wrapping a given 
+
+class NetGraph:
+    """
+    class to define a network-equivalent graph for wrapping a given
     pandapower network, so that we can quickly perform graph operations on it
-    
+
     represent pandapower Net as a numpy() structure for fast iteration
      - only convert from pandas to numpy once for efficiency
-    
+
     >>> Variables:
     | - self.net: pandapower network (pandapower.auxiliary.pandapowerNet)
     |   <> not changed, only used for reference
@@ -113,8 +190,14 @@ class NetGraph():
     >>> Functions:
 
     """
-    def __init__(self, net: aux.pandapowerNet, make_adjacency=True, make_nx=True,
-                 consider_trafos=False):
+
+    def __init__(
+        self,
+        net: aux.pandapowerNet,
+        make_adjacency=True,
+        make_nx=True,
+        consider_trafos=False,
+    ):
         self.net = net
         self.consider_trafos = consider_trafos
         # store all bus, line, and trafo indices as numpy arrays
@@ -126,9 +209,9 @@ class NetGraph():
         self.lines = net.line.index.to_numpy()
         if self.consider_trafos:
             self.trafos = net.trafo.index.to_numpy()
-        
+
         self.N = None
-        if make_nx: 
+        if make_nx:
             self.make_nx_graph()
         # these will be used to model network as adjacency matrix
         self.A = None
@@ -137,10 +220,10 @@ class NetGraph():
 
     def __len__(self):
         return len(self.buses)
-    
+
     def __str__(self):
         return str(self.net)
-    
+
     def idx_to_bus(self, idx: int | Iterable[int]) -> int | list[int]:
         if isinstance(idx, int):
             return self.buses[idx]
@@ -158,25 +241,30 @@ class NetGraph():
         Returns the networkx graph of the network
           - out_of_service: list of buses to exclude from the graph
         """
-        self.N = pptop.create_nxgraph(self.net, multi=False, calc_branch_impedances=True, 
-                                      include_out_of_service=True, 
-                                      respect_switches=True, include_switches=True,
-                                      nogobuses=out_of_service)
+        self.N = pptop.create_nxgraph(
+            self.net,
+            multi=False,
+            calc_branch_impedances=True,
+            include_out_of_service=True,
+            respect_switches=True,
+            include_switches=True,
+            nogobuses=out_of_service,
+        )
         assert isinstance(self.N, nx.Graph)
         return self.N
 
     def make_adjacency_matrix(self, from_nx=False) -> csr_matrix:
         """
         Returns the adjacency matrix of the network
-          where A[bus1, bus2] = line_idx, for the first 2*len(lines) nonzero elements and 
+          where A[bus1, bus2] = line_idx, for the first 2*len(lines) nonzero elements and
             A[bus1, bus2] = trafo_idx, for the next 2*len(trafos) nonzero elements
-        
+
         from_nx = True: use networkx graph to create adjacency matrix
                 = False: use pandapower network to create adjacency matrix
-            
+
         Sets the following internal variables:
           - self.A: the adjacency matrix of the network
-          - self.from_bus 
+          - self.from_bus
           - self.to_bus
           - self.line_buses
           - self.A_lines : (csr_matrix)
@@ -186,6 +274,7 @@ class NetGraph():
             - self.trafo_buses
             - self.A_trafos
         """
+
         n = len(self.buses)
         # LINES
         if from_nx:
@@ -194,10 +283,10 @@ class NetGraph():
             assert isinstance(self.N, nx.Graph)
             self.from_bus, self.to_bus = np.array(self.N.edges).T
             # or whatever this is stored as in the networkX graph
-            self.lines = self.N.edges['index']
+            self.lines = self.N.edges["index"]
         else:
-            self.from_bus = self.net.line['from_bus'].to_numpy()
-            self.to_bus = self.net.line['to_bus'].to_numpy()
+            self.from_bus = self.net.line["from_bus"].to_numpy()
+            self.to_bus = self.net.line["to_bus"].to_numpy()
         self.line_buses = np.unique(np.concatenate([self.from_bus, self.to_bus]))
         # bus IDs -> array positions (bus IDs aren't guaranteed 0..n-1)
         from_pos = np.array([self._pos[int(b)] for b in self.from_bus], dtype=int)
@@ -205,20 +294,24 @@ class NetGraph():
         row_lines = np.concatenate([from_pos, to_pos])
         col_lines = np.concatenate([to_pos, from_pos])
         line_data = np.concatenate([self.lines, self.lines])
-        self.A_lines = csr_matrix((line_data, (row_lines, col_lines)), shape=(n, n), dtype=int)
+        self.A_lines = csr_matrix(
+            (line_data, (row_lines, col_lines)), shape=(n, n), dtype=int
+        )
         # TRAFOS``
         hv_pos = lv_pos = np.array([], dtype=int)
         trafo_data = []
         if self.consider_trafos:
-            self.hv_bus = self.net.trafo['hv_bus'].to_numpy()
-            self.lv_bus = self.net.trafo['lv_bus'].to_numpy()
+            self.hv_bus = self.net.trafo["hv_bus"].to_numpy()
+            self.lv_bus = self.net.trafo["lv_bus"].to_numpy()
             self.trafo_buses = np.unique(np.concatenate([self.hv_bus, self.lv_bus]))
             hv_pos = np.array([self._pos[int(b)] for b in self.hv_bus], dtype=int)
             lv_pos = np.array([self._pos[int(b)] for b in self.lv_bus], dtype=int)
             row_trafos = np.concatenate([hv_pos, lv_pos])
             col_trafos = np.concatenate([lv_pos, hv_pos])
             trafo_data = np.concatenate([self.trafos, self.trafos])
-            self.A_trafos = csr_matrix((trafo_data, (row_trafos, col_trafos)), shape=(n, n), dtype=int)
+            self.A_trafos = csr_matrix(
+                (trafo_data, (row_trafos, col_trafos)), shape=(n, n), dtype=int
+            )
         else:
             self.hv_bus = self.lv_bus = np.array([], dtype=int)
         # concatenate the two matrices into big adjacency matrix
@@ -310,11 +403,15 @@ class NetGraph():
 
         self.buses = busesToKeep
         self._pos = {int(b): i for i, b in enumerate(self.buses)}
-        self.A = csr_matrix((new_data, (new_row, new_col)), shape=(n_new, n_new), dtype=int)
-        self.lines = np.unique(self.A.data) if len(new_data) else np.array([], dtype=int)
-    
-    def add_admittance_impedance(self, net = None | aux.pandapowerNet) -> np.complex64:
-        """ add admittance and impedance matrices to the network as the keys
+        self.A = csr_matrix(
+            (new_data, (new_row, new_col)), shape=(n_new, n_new), dtype=int
+        )
+        self.lines = (
+            np.unique(self.A.data) if len(new_data) else np.array([], dtype=int)
+        )
+
+    def add_admittance_impedance(self, net=None | aux.pandapowerNet) -> np.complex64:
+        """add admittance and impedance matrices to the network as the keys
             'Ybus' and 'Zbus' respectively, stored as csr_matrices
         1. compute the admittance matrix Y_ij by open-circuiting all loads
         Y_{ij} = sum_{k in N(i)} 1/Z_{ik} if i = j
@@ -323,9 +420,10 @@ class NetGraph():
         2. compute the impedance matrix Z_ij = inv(Y_ij)
 
         ASSUMPTIONS
-        1. if self.A exists, self.net.line has not been updated since. 
+        1. if self.A exists, self.net.line has not been updated since.
            : current self.A should match current self.net.line
         """
+
         if self.A is None:
             self.make_adjacency_matrix()
         if net is None:
@@ -336,7 +434,7 @@ class NetGraph():
         # get addmittance from each (from, to) line
         from_bus = self.from_bus
         to_bus = self.to_bus
-        Y = admittance_of_pd(net.line).to_numpy() # = 1/Z = 1/(R+jX) = 1 / l*(r+jx)
+        Y = admittance_of_pd(net.line).to_numpy()  # = 1/Z = 1/(R+jX) = 1 / l*(r+jx)
         # get maximum admittance for normalization purposes
         Ymax = np.max(np.abs(Y))
         # all buses contained in (from, to)
@@ -354,14 +452,17 @@ class NetGraph():
         col_indices = np.concatenate([buses, to_bus, from_bus])
         data = np.concatenate([diag, -Y, -Y])
         n = len(buses)
-        Y = csr_matrix((data, (row_indices, col_indices)), shape=(n, n), dtype=np.complex64)
-        net['Ybus'] = Y
-        net['Zbus'] = inv(Y)
+        Y = csr_matrix(
+            (data, (row_indices, col_indices)), shape=(n, n), dtype=np.complex64
+        )
+        net["Ybus"] = Y
+        net["Zbus"] = inv(Y)
         return Ymax
 
-@ timeIt
+
+@timeIt
 def add_admittance_impedance(net: aux.pandapowerNet) -> np.complex64:
-    """ add admittance and impedance matrices to the network as the keys
+    """add admittance and impedance matrices to the network as the keys
         'Ybus' and 'Zbus' respectively, stored as csr_matrices, indexed by
         array position (0..n-1 in net.bus.index order) -- not raw bus IDs,
         which aren't guaranteed contiguous (see NetGraph._pos)
@@ -371,14 +472,15 @@ def add_admittance_impedance(net: aux.pandapowerNet) -> np.complex64:
       Y_{ij} = 0 if i \neq j and (i, j) is not a line
     2. compute the impedance matrix Z_ij = inv(Y_ij)
     """
+
     buses = net.bus.index.to_numpy()
     bus_pos = {b: i for i, b in enumerate(buses)}
     # get addmittance from each (from, to) line
-    from_bus = net.line['from_bus'].to_numpy()
-    to_bus = net.line['to_bus'].to_numpy()
+    from_bus = net.line["from_bus"].to_numpy()
+    to_bus = net.line["to_bus"].to_numpy()
     from_pos = np.array([bus_pos[b] for b in from_bus], dtype=int)
     to_pos = np.array([bus_pos[b] for b in to_bus], dtype=int)
-    Y = admittance_of_pd(net.line).to_numpy() # = 1/Z = 1/(R+jX) = 1 / l*(r+jx)
+    Y = admittance_of_pd(net.line).to_numpy()  # = 1/Z = 1/(R+jX) = 1 / l*(r+jx)
     # get maximum admittance for normalization purposes
     Ymax = np.max(np.abs(Y))
     n = len(buses)
@@ -394,22 +496,27 @@ def add_admittance_impedance(net: aux.pandapowerNet) -> np.complex64:
     col_indices = np.concatenate([positions, to_pos, from_pos])
     data = np.concatenate([diag, -Y, -Y])
     Y = csr_matrix((data, (row_indices, col_indices)), shape=(n, n), dtype=np.complex64)
-    net['Ybus'] = Y
-    net['Zbus'] = inv(Y)
+    net["Ybus"] = Y
+    net["Zbus"] = inv(Y)
     return Ymax
 
-def power_transfer_distribution_factor(net: aux.pandapowerNet, a_line: int, t_line: int) -> float:
+
+def power_transfer_distribution_factor(
+    net: aux.pandapowerNet, a_line: int, t_line: int
+) -> float:
     """
     Calculates the PTDF between two busses i and j for the given line
     line_idx
     PTDF = (Z_im - Z_in - Z_jm + Z_jn) / X_ij
       for impedances Z, reactance X, and busses i, j, m, n
     assume power transfer is small and system is operating in linear regime
-    - a_line: idx of affected line 
+    - a_line: idx of affected line
     - t_line: idx of transaction line to be perturbed
     """
+
     # calculate impedances if not already calculated
-    if 'Zbus' not in net: add_admittance_impedance(net)
+    if "Zbus" not in net:
+        add_admittance_impedance(net)
     # Zbus is indexed by array position (see add_admittance_impedance), not
     # raw bus ID -- remap before indexing into it
     bus_pos = {b: p for p, b in enumerate(net.bus.index.to_numpy())}
@@ -420,15 +527,16 @@ def power_transfer_distribution_factor(net: aux.pandapowerNet, a_line: int, t_li
     # X_ij is the total reactance of the perturbed (reference) line t_line,
     # not a (bus,bus)-indexed quantity. x_ohm_per_km is a line input
     # (net.line), not a power-flow result -- net.res_line doesn't carry it.
-    X = net.line.loc[t_line, 'x_ohm_per_km'] * net.line.loc[t_line, 'length_km']
-    Z = net['Zbus']
-    return (abs(Z[i,m]) - abs(Z[i,n]) - abs(Z[j,m]) + abs(Z[j,n])) / X
+    X = net.line.loc[t_line, "x_ohm_per_km"] * net.line.loc[t_line, "length_km"]
+    Z = net["Zbus"]
+    return (abs(Z[i, m]) - abs(Z[i, n]) - abs(Z[j, m]) + abs(Z[j, n])) / X
+
 
 # NOTE: min_sensitivity_matrix / electrical_coupling_strength_matrix /
 # modularity_matrix below are only reached when microgrid_objective() is
 # called with lambd<1 -- the default (lambd=1) path uses self_reliance_matrix
 # only.
-@ timeIt
+@timeIt
 def min_sensitivity_matrix(net: aux.pandapowerNet) -> csr_matrix:
     """
     Returns the (normalized) minimum sensitivity matrix for the network
@@ -436,10 +544,13 @@ def min_sensitivity_matrix(net: aux.pandapowerNet) -> csr_matrix:
     C_{ij} = min_l P_l*PTDF_{ij}^l, for all lines (i,j)
     Matrix is indexed by array position (0..n-1 in net.bus.index order).
     """
-    if 'Zbus' not in net: add_admittance_impedance(net)
+    if "Zbus" not in net:
+        add_admittance_impedance(net)
     bus_pos = {b: p for p, b in enumerate(net.bus.index.to_numpy())}
-    from_pos = np.array([bus_pos[b] for b in net.line['from_bus'].to_numpy()], dtype=int)
-    to_pos = np.array([bus_pos[b] for b in net.line['to_bus'].to_numpy()], dtype=int)
+    from_pos = np.array(
+        [bus_pos[b] for b in net.line["from_bus"].to_numpy()], dtype=int
+    )
+    to_pos = np.array([bus_pos[b] for b in net.line["to_bus"].to_numpy()], dtype=int)
     n = len(net.bus)
     C = np.zeros(len(net.line), dtype=float)
     maxC = -np.inf  # normalize sensitivity weighting
@@ -447,7 +558,7 @@ def min_sensitivity_matrix(net: aux.pandapowerNet) -> csr_matrix:
         min_coeff = np.inf
         # lines don't carry their own vn_kv in pandapower -- use the
         # voltage of the bus the line originates from
-        vn_kv = net.bus.loc[net.line.loc[line, 'from_bus'], 'vn_kv']
+        vn_kv = net.bus.loc[net.line.loc[line, "from_bus"], "vn_kv"]
         for line2 in net.line.index:
             if line == line2:  # PTDF is 0 for the same line
                 continue
@@ -461,8 +572,11 @@ def min_sensitivity_matrix(net: aux.pandapowerNet) -> csr_matrix:
     ret = csr_matrix((data, (row_indices, col_indices)), shape=(n, n), dtype=float)
     return ret
 
-@ timeIt
-def electrical_coupling_strength_matrix(net: aux.pandapowerNet, alpha=0.5) -> csr_matrix:
+
+@timeIt
+def electrical_coupling_strength_matrix(
+    net: aux.pandapowerNet, alpha=0.5
+) -> csr_matrix:
     """
     Returns the electrical coupling strength of the network
          A_{ij} = | alpha Y_ij + beta C_ij |
@@ -470,23 +584,27 @@ def electrical_coupling_strength_matrix(net: aux.pandapowerNet, alpha=0.5) -> cs
       here alpha = beta = 1/2
      - Used for subsequent microgrid optimization formulations
     """
-    if alpha < 0 or alpha > 1: alpha = 0.5
-    if 'Zbus' not in net: add_admittance_impedance(net)
-    Y = net['Ybus']
+    if alpha < 0 or alpha > 1:
+        alpha = 0.5
+    if "Zbus" not in net:
+        add_admittance_impedance(net)
+    Y = net["Ybus"]
     Ymax = np.max(np.abs(Y.data)) if Y.nnz else 1.0
     Yn = abs(Y) / Ymax
     # get the normalized sensitivity matrix
     C = min_sensitivity_matrix(net)
     return abs(alpha * Yn + (1 - alpha) * C)
 
-@ timeIt
+
+@timeIt
 def modularity_matrix(net: aux.pandapowerNet) -> csr_matrix:
     """
     Returns the modularity matrix of the network
       M_{ij} = 1/2m ( A_{ij} - k_i*k_j / 2m )
-    where A is the electrical coupling strength matrix, k_i is the sum of weights of bus i, 
+    where A is the electrical coupling strength matrix, k_i is the sum of weights of bus i,
      and m is the sum of all edge weights (not double counted)
     """
+
     A = electrical_coupling_strength_matrix(net, alpha=0.5)
     k = np.asarray(A.sum(axis=1)).flatten()
     m = k.sum()
@@ -495,7 +613,8 @@ def modularity_matrix(net: aux.pandapowerNet) -> csr_matrix:
     M = (A - np.outer(k, k) / m) / m
     return csr_matrix(M)
 
-@ timeIt
+
+@timeIt
 def self_reliance_matrix(net: aux.pandapowerNet) -> csr_matrix:
     """
     Returns the self-reliance matrix of the network, normalized by the maximum power
@@ -510,11 +629,15 @@ def self_reliance_matrix(net: aux.pandapowerNet) -> csr_matrix:
     # both positive
     n = len(net.bus)
     bus_pos = {b: i for i, b in enumerate(net.bus.index)}
-    loads = []        # store p_i values
+    loads = []  # store p_i values
     power_buses = []  # store bus array positions
-    max_P = 0         # normalize powers
+    max_P = 0  # normalize powers
     for bus in net.bus.index:
-        load = net.load.loc[net.load['bus'] == bus, 'p_mw'].sum() - net.gen.loc[net.gen['bus'] == bus, 'p_mw'].sum() - net.sgen.loc[net.sgen['bus'] == bus, 'p_mw'].sum()
+        load = (
+            net.load.loc[net.load["bus"] == bus, "p_mw"].sum()
+            - net.gen.loc[net.gen["bus"] == bus, "p_mw"].sum()
+            - net.sgen.loc[net.sgen["bus"] == bus, "p_mw"].sum()
+        )
         if load:
             max_P = max(max_P, load**2)
             loads.append(load)
@@ -533,11 +656,12 @@ def self_reliance_matrix(net: aux.pandapowerNet) -> csr_matrix:
     return S
 
 
-@ timeIt
-def microgrid_objective(net: aux.pandapowerNet, lambd = 0.5) -> csr_matrix:
-    """ create microgrid objective weightings for the given network 
-     - lambd: percent weighting of self-reliance matrix vs. modularity """
-    if lambd < 0 or lambd > 1: lambd = 0.5
+@timeIt
+def microgrid_objective(net: aux.pandapowerNet, lambd=0.5) -> csr_matrix:
+    """create microgrid objective weightings for the given network
+    - lambd: percent weighting of self-reliance matrix vs. modularity"""
+    if lambd < 0 or lambd > 1:
+        lambd = 0.5
     if lambd == 0:
         return modularity_matrix(net)
     if lambd == 1:
@@ -545,11 +669,13 @@ def microgrid_objective(net: aux.pandapowerNet, lambd = 0.5) -> csr_matrix:
     M = modularity_matrix(net)
     S = self_reliance_matrix(net)
     # objective function to minimize, sum over all idx (i,j)
-    f = lambd*S - (1-lambd)*M
+    f = lambd * S - (1 - lambd) * M
     return f
 
 
-def partition_csr(f: csr_matrix, indices: dict[int,bool]) -> tuple[csr_matrix, csr_matrix]:
+def partition_csr(
+    f: csr_matrix, indices: dict[int, bool]
+) -> tuple[csr_matrix, csr_matrix]:
     """
     Partitions a square csr_matrix f into two matrices f1, f2
 
@@ -570,8 +696,8 @@ def partition_csr(f: csr_matrix, indices: dict[int,bool]) -> tuple[csr_matrix, c
     row1, col1, data1 = [], [], []
     row2, col2, data2 = [], [], []
     # iterate over all items in f
-    for row in range(len(f.indptr)-1):
-        for idx in range(f.indptr[row], f.indptr[row+1]):
+    for row in range(len(f.indptr) - 1):
+        for idx in range(f.indptr[row], f.indptr[row + 1]):
             col = f.indices[idx]
             d = f.data[idx]
             t1, t2 = indices.get(row, False), indices.get(col, False)
@@ -589,32 +715,36 @@ def partition_csr(f: csr_matrix, indices: dict[int,bool]) -> tuple[csr_matrix, c
     f2 = csr_matrix((data2, (row2, col2)), shape=(n2, n2), dtype=float)
     return f1, f2
 
-def to_QUBO(f: csr_matrix) -> tuple[dict[tuple[int,int], float], float]:
-    """
+
+def to_QUBO(f: csr_matrix) -> tuple[dict[tuple[int, int], float], float]:
+    r"""
     Converts the given objective f to a QUBO representation with at most n(n-1)/2 variables
       (which is upper-trianglar), using the formula
-          Q = sum_{i,j} f_{ij} (x_i = x_j)
-             where (x_i=x_j) = 1 if x_i = x_j and 0 otherwise
-          Q = sum_{i,j} f_{ij} (2 x_i x_j - x_i - x_j + 1)
+      : math :
+
+      Q_ij =   \sum_{k<l} f_{kl} (\mathbb{1}_{x_k == x_l})
+          + \sum_{k,l} f_{kl} (2 x_k x_l - x_k - x_l + 1)
 
     Returns (QUBO_dict, offset)
     """
+
     offset = np.sum(f.data)
-    #TODO: compare speed with np.zeros(n,n)
+    # TODO: compare speed with np.zeros(n,n)
     Q = defaultdict(int)
-    for i in range(len(f.indptr)-1):
-        for idx in range(f.indptr[i], f.indptr[i+1]):
+    for i in range(len(f.indptr) - 1):
+        for idx in range(f.indptr[i], f.indptr[i + 1]):
             j = f.indices[idx]
             d = f.data[idx]
             if i > j:  # keep upper-triangular
-                Q[(j,i)] += 2*d
+                Q[(j, i)] += 2 * d
             else:
-                Q[(i,j)] += 2*d
-            Q[(j,j)] -= d
-            Q[(i,i)] -= d
+                Q[(i, j)] += 2 * d
+            Q[(j, j)] -= d
+            Q[(i, i)] -= d
     return dict(Q), offset
 
-def QUBO_energy(Q: dict[tuple[int,int], float], x: dict[int, int]) -> float:
+
+def QUBO_energy(Q: dict[tuple[int, int], float], x: dict[int, int]) -> float:
     """
     Returns the energy of the given QUBO and solution using the formula
         E = sum_{i,j} Q_{ij} x_i x_j = x.T Q x
@@ -623,8 +753,9 @@ def QUBO_energy(Q: dict[tuple[int,int], float], x: dict[int, int]) -> float:
     """
     energy = 0
     for (i, j), d in Q.items():
-        energy += d*x[i]*x[j]
+        energy += d * x[i] * x[j]
     return energy
+
 
 def objective_energy(f: csr_matrix, x: dict[int, int]) -> float:
     """
@@ -633,8 +764,8 @@ def objective_energy(f: csr_matrix, x: dict[int, int]) -> float:
      - x (dict): x[bus index] = partition number
     """
     energy = 0
-    for i in range(len(f.indptr)-1):
-        for idx in range(f.indptr[i], f.indptr[i+1]):
+    for i in range(len(f.indptr) - 1):
+        for idx in range(f.indptr[i], f.indptr[i + 1]):
             j = f.indices[idx]
             d = f.data[idx]
             # QUBO matrix does this already by encoding x_i = x_j when summed over
@@ -661,10 +792,13 @@ def simulate_anneal(bqm: BQM, num_reads=1000) -> tuple[dict[int, int], float]:
     return dict(best.sample), float(best.energy)
 
 
-class PartitionStorage():
+class PartitionStorage:
     """Bookkeeping for one queued sub-network in microgrid_optimization's
     (currently single-level) partition search."""
-    def __init__(self, level: int, objective: csr_matrix, best_energy: float, buses: list[int]):
+
+    def __init__(
+        self, level: int, objective: csr_matrix, best_energy: float, buses: list[int]
+    ):
         self.level = level
         self.objective = objective
         self.best_energy = best_energy
@@ -673,8 +807,11 @@ class PartitionStorage():
     def unpack(self) -> tuple[int, csr_matrix, float]:
         return self.level, self.objective, self.best_energy
 
-@ timeIt
-def microgrid_optimization(net: aux.pandapowerNet, lambd = 1, num_reads=1000) -> tuple[dict[int, int], float]:
+
+@timeIt
+def microgrid_optimization(
+    net: aux.pandapowerNet, lambd=1, num_reads=1000
+) -> tuple[dict[int, int], float]:
     """
     Solves the microgrid partitioning problem for the given network as a
     single QUBO bipartition (splits buses into two groups by minimizing the
@@ -699,10 +836,11 @@ def microgrid_optimization(net: aux.pandapowerNet, lambd = 1, num_reads=1000) ->
     solution, energy = simulate_anneal(bqm, num_reads)
     return solution, energy
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     while 1:
-        t = input('which example to try? (minimal, california)\n>>').rstrip().lower()
-        if 'm' in t:
+        t = input("which example to try? (minimal, california)\n>>").rstrip().lower()
+        if "m" in t:
             net = create_minimal_example(nbusses=3)
             print(net.load)
             print(net.gen)
@@ -717,15 +855,14 @@ if __name__ == '__main__':
               A.indptr is a row iterator
               A.indices stores all column indices
               A.data stores all relevant data"""
-            for row in range(len(A.indptr)-1):
+            for row in range(len(A.indptr) - 1):
                 start = A.indptr[row]
-                end = A.indptr[row+1]
+                end = A.indptr[row + 1]
                 cols = A.indices[start:end]
                 data = A.data[start:end]
                 print(f"row {row}: {cols} -> {data}")
 
-
-            #ppplot.simple_plot(net, plot_loads = True, plot_gens=True)
+            # ppl.simple_plotly(net, on_map=False, auto_open=True).show()
         else:
             cwd = os.getcwd()
             net = pp.from_sqlite(cwd + '/data/ppnets/transnet-california-n.db')
